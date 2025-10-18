@@ -321,7 +321,8 @@ if (!container) {
                     azureVisemeSeq.push({ visemeId, visemeName, offsetSeconds });
                 };
 
-                azureSynthesizer.synthesisStarted = () => {
+                // Start lipsync timing only when audio actually starts playing
+                azureSynthesizer.synthesizing = () => {
                     speaking = true;
                     azureStartTime = performance.now();
                 };
@@ -467,7 +468,12 @@ function applyViseme(visemeName) {
     // If we have a direct mapping, apply it
     if (visemeMap[visemeName]) {
         const { mesh, index } = visemeMap[visemeName];
-        mesh.morphTargetInfluences[index] = 0.4;
+        // Make 'mouthClose' (used for 'm') less exaggerated
+        if (visemeName === 'mouthClose') {
+            mesh.morphTargetInfluences[index] = 0.18; // reduced from 0.4 for natural look
+        } else {
+            mesh.morphTargetInfluences[index] = 0.4;
+        }
         // jaw handling
         if (visemeName === 'aa' || visemeName === 'oh' || visemeName === 'ou' || visemeName === 'E' || visemeName === 'jawOpen') {
             const jawIndex = mesh.morphTargetDictionary['jawOpen'];
