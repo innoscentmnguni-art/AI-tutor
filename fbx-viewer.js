@@ -16,17 +16,24 @@ if (ttsForm) {
     speakBtn = ttsForm.querySelector('button');
 }
 
+// Optional simple UI for Azure Speech key and region (in-memory only)
+let azureKey = '';
+let azureRegion = '';
+// You can set these via window.azureSpeechKey and window.azureSpeechRegion before clicking Speak,
+// or extend the UI to include input fields for key/region.
+
+
 // Helper: Find jaw bone and viseme blendshapes
 let jawBone = null;
 let visemeMap = {};
 let currentViseme = null;
 let visemeWeight = 0;
 
-// Viseme names to look for (common for Oculus/ARKit/VRM)
+// Viseme names to look for (matching the model's morph targets)
 const visemeNames = [
-    'viseme_aa', 'viseme_ih', 'viseme_ou', 'viseme_e', 'viseme_oh', 'viseme_U',
-    'viseme_F', 'viseme_L', 'viseme_M', 'viseme_W', 'viseme_S', 'viseme_CH', 'viseme_D', 'viseme_R', 'viseme_TH',
-    'jawOpen', 'JawOpen', 'jaw_open', 'mouthOpen', 'MouthOpen', 'mouth_open'
+    'aa', 'ih', 'ou', 'E', 'oh', 
+    'FF', 'SS', 'CH', 'DD', 'RR', 'TH', 'PP', 'kk', 'nn',
+    'jawOpen', 'mouthClose', 'mouthFunnel'
 ];
 
 if (!container) {
@@ -43,11 +50,41 @@ if (!container) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
     const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-    camera.position.set(0, 1.6, 3);
+    // Position camera closer to face level
+    camera.position.set(0, 1.6, 1.5);
 
     // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1, 0);
+    controls.target.set(0, 1.5, 0); // Look at the face
+    controls.minDistance = 0.5; // Allow getting closer
+    controls.maxDistance = 4; // Limit how far you can zoom out
+    controls.enableDamping = true; // Smooth camera movements
+    controls.dampingFactor = 0.05;
+    
+    // Add keyboard controls for panning
+    window.addEventListener('keydown', (e) => {
+        const panSpeed = 0.1;
+        switch(e.key) {
+            case 'ArrowUp':
+                controls.target.y += panSpeed;
+                camera.position.y += panSpeed;
+                break;
+            case 'ArrowDown':
+                controls.target.y -= panSpeed;
+                camera.position.y -= panSpeed;
+                break;
+            case 'ArrowLeft':
+                controls.target.x -= panSpeed;
+                camera.position.x -= panSpeed;
+                break;
+            case 'ArrowRight':
+                controls.target.x += panSpeed;
+                camera.position.x += panSpeed;
+                break;
+        }
+        controls.update();
+    });
+    
     controls.update();
 
     // Lights
@@ -83,11 +120,29 @@ if (!container) {
                 child.castShadow = true;
                 child.receiveShadow = true;
                 // Print all morph target names for debugging
-                if (child.morphTargetDictionary) {
-                    console.log('Morph targets found:', Object.keys(child.morphTargetDictionary));
+                if (child.morphTargetDictionary && child.morphTargetInfluences) {
+                    console.log('Checking mesh:', child.name);
+                    console.log('Has morphTargetInfluences:', !!child.morphTargetInfluences, 'Length:', child.morphTargetInfluences.length);
+                    
+                    // Check if this mesh has most of our visemes (to find the main face mesh)
+                    let visemeCount = 0;
                     for (const v of visemeNames) {
                         if (child.morphTargetDictionary[v] !== undefined) {
-                            visemeMap[v] = { mesh: child, index: child.morphTargetDictionary[v] };
+                            visemeCount++;
+                        }
+                    }
+                    
+                    // If this mesh has more visemes than our current best, use it
+                    if (visemeCount > Object.keys(visemeMap).length) {
+                        visemeMap = {}; // Clear previous mappings
+                        console.log('Found better mesh with', visemeCount, 'visemes:', child.name);
+                        console.log('Morph targets:', Object.keys(child.morphTargetDictionary));
+                        
+                        for (const v of visemeNames) {
+                            if (child.morphTargetDictionary[v] !== undefined) {
+                                visemeMap[v] = { mesh: child, index: child.morphTargetDictionary[v] };
+                                console.log('Mapped viseme:', v, 'to index:', child.morphTargetDictionary[v]);
+                            }
                         }
                     }
                 }
@@ -141,49 +196,174 @@ if (!container) {
     let audioSource = null;
     let audioContext = null;
     let ttsUtterance = null;
-
-
-    // --- WAWA lipsync logic ---
+        // --- WAWA lipsync logic ---
     let wawaVisemeSeq = [];
     let wawaStartTime = 0;
     let wawaDuration = 0;
 
-    // WAWA: map vowels/consonants to your actual morph target names
+        // --- Azure Speech SDK synthesizer and viseme handling ---
+        let azureSynthesizer = null;
+        let azureVisemeSeq = []; // array of {visemeId, visemeName, offsetSeconds}
+        let azureStartTime = 0;
+        let usingAzure = false;
+
+    // Enhanced phoneme to viseme mapping
     const wawaMap = {
-        'a': 'aa',
-        'e': 'E',
-        'i': 'ih',
-        'o': 'oh',
-        'u': 'ou',
-        'm': 'mouthClose', // best match for closed mouth
+        'a': 'aa',  // as in "father"
+        'æ': 'aa',  // as in "cat"
+        'ə': 'ih',  // schwa sound
+        'e': 'E',   // as in "bed"
+        'i': 'ih',  // as in "bit"
+        'ī': 'ih',  // as in "beet"
+        'o': 'oh',  // as in "boat"
+        'u': 'ou',  // as in "boot"
+        'ʌ': 'aa',  // as in "but"
+        
+        'm': 'mouthClose',
+        'b': 'mouthClose',
+        'p': 'PP',
+        
         'w': 'mouthFunnel',
-        'l': 'mouthSmileLeft',
-        'f': 'FF',
         'r': 'RR',
+        
+        'f': 'FF',
+        'v': 'FF',
+        
         's': 'SS',
+        'z': 'SS',
+        
         'd': 'DD',
         't': 'TH',
-        'c': 'CH',
-        'p': 'PP',
+        'th': 'TH',
+        
+        'ch': 'CH',
+        'sh': 'CH',
+        'j': 'CH',
+        
         'n': 'nn',
+        'ng': 'nn',
+        
         'k': 'kk',
-        'x': 'aa', // fallback
+        'g': 'kk',
+        
+        'h': 'aa',    // slight mouth opening
+        'y': 'ih',    // like in "yes"
+        'l': 'ih',    // tongue position
+        
+        // Fallback for any unmatched phoneme
+        'x': 'aa'
     };
 
     function textToWawaVisemes(text) {
-        // Simple: map each vowel/consonant to a viseme, fallback to 'aa'
+        // Enhanced: handle multi-character phonemes and improve timing
         let seq = [];
-        for (let ch of text.toLowerCase()) {
-            if (wawaMap[ch]) seq.push(wawaMap[ch]);
-            else if ('aeiou'.includes(ch)) seq.push('viseme_aa');
-            else if (ch === ' ') seq.push(null); // rest
+        const words = text.toLowerCase().split(' ');
+        
+        for (const word of words) {
+            if (word.length === 0) continue;
+            
+            // Process each word
+            let i = 0;
+            while (i < word.length) {
+                // Check for multi-character phonemes first
+                let found = false;
+                ['th', 'ch', 'sh', 'ng'].forEach(phoneme => {
+                    if (word.slice(i).startsWith(phoneme)) {
+                        seq.push(wawaMap[phoneme]);
+                        i += phoneme.length;
+                        found = true;
+                    }
+                });
+                
+                if (!found) {
+                    const ch = word[i];
+                    if (wawaMap[ch]) {
+                        seq.push(wawaMap[ch]);
+                    } else if ('aeiou'.includes(ch)) {
+                        seq.push('aa'); // Default vowel viseme
+                    }
+                    i++;
+                }
+            }
+            
+            // Add a brief pause between words
+            seq.push(null);
         }
-        return seq.length ? seq : ['viseme_aa'];
+        
+        return seq.length ? seq : ['aa'];
     }
 
     function startLipsync(text) {
+        // If Azure key/region are provided either via global window variables or local values, prefer Azure
+        if ((window.azureSpeechKey || azureKey) && (window.azureSpeechRegion || azureRegion) && window.SpeechSDK) {
+            usingAzure = true;
+            const key = window.azureSpeechKey || azureKey;
+            const region = window.azureSpeechRegion || azureRegion;
+
+            try {
+                const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
+                // Optional: set voice name
+                // speechConfig.speechSynthesisVoiceName = 'en-US-JennyNeural';
+
+                // Use default audio output (speakers)
+                const audioConfig = SpeechSDK.AudioConfig.fromDefaultSpeakerOutput();
+                azureSynthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
+
+                // Clear previous viseme sequence
+                azureVisemeSeq = [];
+
+                azureSynthesizer.visemeReceived = (s, e) => {
+                    // e.visemeId is the viseme index from Azure; e.audioOffset is duration in ticks (100ns units)
+                    const offsetSeconds = e.audioOffset / 10000000.0;
+                    const visemeId = e.visemeId;
+                    // Map Azure viseme id to a readable name using known mapping (see note below)
+                    const visemeName = mapAzureVisemeIdToName(visemeId);
+                    azureVisemeSeq.push({ visemeId, visemeName, offsetSeconds });
+                };
+
+                azureSynthesizer.synthesisStarted = () => {
+                    speaking = true;
+                    azureStartTime = performance.now();
+                };
+                azureSynthesizer.synthesisCompleted = () => {
+                    speaking = false;
+                    // reset morphs
+                    for (const v in visemeMap) visemeMap[v].mesh.morphTargetInfluences[visemeMap[v].index] = 0;
+                    if (jawBone) jawBone.rotation.x = 0;
+                    azureVisemeSeq = [];
+                };
+
+                azureSynthesizer.speakTextAsync(text,
+                    result => {
+                        if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
+                            console.log('Azure synthesis finished');
+                        } else {
+                            console.warn('Azure synthesis result:', result);
+                        }
+                    },
+                    error => {
+                        console.error('Azure synthesis error:', error);
+                        // fallback to web speech and WAWA mapping
+                        usingAzure = false;
+                        startLipsyncFallback(text);
+                    }
+                );
+
+            } catch (err) {
+                console.error('Failed to initialize Azure Speech SDK:', err);
+                usingAzure = false;
+                startLipsyncFallback(text);
+            }
+            return;
+        }
+
+        // Fallback to the previous Web Speech API + WAWA mapping
+        startLipsyncFallback(text);
+    }
+
+    function startLipsyncFallback(text) {
         if (!window.speechSynthesis) {
-            alert('Web Speech API not supported in this browser.');
+            alert('Web Speech API not supported in this browser and Azure not configured.');
             return;
         }
         if (speaking) {
@@ -191,9 +371,6 @@ if (!container) {
             speaking = false;
         }
         ttsUtterance = new SpeechSynthesisUtterance(text);
-        // Optionally set voice, pitch, rate, etc.
-        // ttsUtterance.voice = ...
-        // ttsUtterance.rate = 1.0;
 
         // Generate viseme sequence from text
         wawaVisemeSeq = textToWawaVisemes(text);
@@ -238,29 +415,72 @@ if (!container) {
         if (mixer) mixer.update(delta);
 
         // WAWA lipsync animation
-        if (speaking && wawaVisemeSeq.length > 0) {
-            const now = performance.now();
-            const elapsed = (now - wawaStartTime) / 1000.0;
-            // Cycle through viseme sequence based on estimated duration
-            let idx = Math.floor((elapsed / wawaDuration) * wawaVisemeSeq.length);
-            if (idx >= wawaVisemeSeq.length) idx = wawaVisemeSeq.length - 1;
-            // Reset all visemes
-            for (const v in visemeMap) visemeMap[v].mesh.morphTargetInfluences[visemeMap[v].index] = 0;
-            // Activate current viseme
-            const blend = wawaVisemeSeq[idx];
-            if (blend && visemeMap[blend]) {
-                visemeMap[blend].mesh.morphTargetInfluences[visemeMap[blend].index] = 0.8;
-            }
-            // Animate jaw bone for open visemes
-            if (jawBone) {
-                if (blend && ['viseme_aa','viseme_oh','viseme_ou'].includes(blend)) {
-                    jawBone.rotation.x = 0.25;
-                } else {
-                    jawBone.rotation.x = 0.05;
+        if (speaking) {
+            // If using Azure, drive morphs from azureVisemeSeq (timed by audio offset)
+            if (usingAzure && azureVisemeSeq.length > 0) {
+                const now = (performance.now() - azureStartTime) / 1000.0; // seconds since start
+                // Find last viseme whose offsetSeconds <= now
+                let active = null;
+                for (let i = 0; i < azureVisemeSeq.length; i++) {
+                    if (azureVisemeSeq[i].offsetSeconds <= now) active = azureVisemeSeq[i];
+                    else break;
+                }
+                if (active) {
+                    applyViseme(active.visemeName);
+                }
+            } else if (wawaVisemeSeq.length > 0) {
+                // Fallback WAWA timing
+                const now = performance.now();
+                const elapsed = (now - wawaStartTime) / 1000.0;
+                let idx = Math.floor((elapsed / wawaDuration) * wawaVisemeSeq.length);
+                if (idx >= wawaVisemeSeq.length) idx = wawaVisemeSeq.length - 1;
+                const blend = wawaVisemeSeq[idx];
+                if (blend && visemeMap[blend]) {
+                    applyViseme(blend);
                 }
             }
         }
         renderer.render(scene, camera);
     }
     animate();
+}
+
+// Map Azure viseme ids (0-21) to viseme names. The mapping below is approximate and should be tuned per voice/model.
+function mapAzureVisemeIdToName(id) {
+    // Azure uses a viseme set; this mapping is a common approximation.
+    const map = {
+        0: 'sil', 1: 'PP', 2: 'FF', 3: 'TH', 4: 'DD', 5: 'kk', 6: 'CH', 7: 'SS', 8: 'nn', 9: 'RR',
+        10: 'aa', 11: 'E', 12: 'ih', 13: 'oh', 14: 'ou', 15: 'mouthFunnel', 16: 'mouthClose', 17: 'jawOpen',
+        18: 'other', 19: 'other', 20: 'other', 21: 'other'
+    };
+    return map[id] || 'aa';
+}
+
+// Apply a viseme name to the model: reset other morphs and set the matched morphTargetInfluence
+function applyViseme(visemeName) {
+    const currentMesh = Object.values(visemeMap)[0]?.mesh;
+    if (!currentMesh) return;
+    // Reset all morph targets
+    for (let i = 0; i < currentMesh.morphTargetInfluences.length; i++) {
+        currentMesh.morphTargetInfluences[i] = 0;
+    }
+    // If we have a direct mapping, apply it
+    if (visemeMap[visemeName]) {
+        const { mesh, index } = visemeMap[visemeName];
+        mesh.morphTargetInfluences[index] = 0.4;
+        // jaw handling
+        if (visemeName === 'aa' || visemeName === 'oh' || visemeName === 'ou' || visemeName === 'E' || visemeName === 'jawOpen') {
+            const jawIndex = mesh.morphTargetDictionary['jawOpen'];
+            if (jawIndex !== undefined) mesh.morphTargetInfluences[jawIndex] = 0.22;
+        }
+    } else {
+        // fallback: try to set jaw open or subtle mouth movement
+        const jawIndex = currentMesh.morphTargetDictionary['jawOpen'];
+        if (jawIndex !== undefined) currentMesh.morphTargetInfluences[jawIndex] = 0.12;
+    }
+    // animate jaw bone slightly
+    if (jawBone) {
+        if (['aa', 'oh', 'ou', 'jawOpen'].includes(visemeName)) jawBone.rotation.x = 0.25;
+        else jawBone.rotation.x = 0.05;
+    }
 }

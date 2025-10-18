@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "wawa-lipsync": "^0.0.1"
+    "# note": "If you bundle with npm, install the Azure Speech SDK: npm install @azure/cognitiveservices-speech-sdk",
+    "# removed": "wawa-lipsync dependency removed; using Azure Speech SDK via browser script"
   }
 }
