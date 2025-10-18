@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Tutor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-    <link href="style.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>
 <body>
     <nav class="navbar navbar-dark bg-dark">
@@ -84,12 +85,10 @@
         </div>
     </div>
 
-    <!--Edit Start-->
+    <!-- Main content -->
     <div class="container-fluid">
         <div class="row" style="min-height:70vh;">
-            <!-- left sidebar column (visual "some content" area) -->
             <aside class="col-lg-3 col-md-4 col-12 d-flex flex-column gap-2 p-3">
-                <!-- replicate compact sidebar visuals (no visible descriptive text) -->
                 <div class="d-none d-md-block">
                     <ul class="list-unstyled mb-0">
                         <li class="mb-2"><span class="d-inline-block bg-secondary rounded" style="width:12px; height:12px;"></span></li>
@@ -99,10 +98,8 @@
                         <li class="mb-2"><span class="d-inline-block bg-secondary rounded" style="width:12px; height:12px;"></span></li>
                     </ul>
                 </div>
-                <!-- keep space for additional sidebar content if needed -->
             </aside>
 
-            <!-- main content: center the black box -->
             <main class="col-lg-9 col-md-8 col-12 d-flex flex-column align-items-center py-4">
                 <div class="black-box d-flex align-items-center justify-content-center mb-3">
                     <div id="fbx-container" style="width:100%;height:100%;"></div>
@@ -114,27 +111,24 @@
             </main>
         </div>
     </div>
-    <!--Edit end-->
-</body>
-<!-- Three.js and FBX loader via module imports (ES module) -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-<!-- Import map to resolve bare specifier "three" used by the examples modules -->
-<script type="importmap">
-{
-    "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js",
-        "three/": "https://cdn.jsdelivr.net/npm/three@0.159.0/"
-    }
-}
-</script>
 
-<script type="module">
-    import './fbx-viewer.js';
-    import './script.js';
-</script>
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Three.js import map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js",
+            "three/": "https://cdn.jsdelivr.net/npm/three@0.159.0/"
+        }
+    }
+    </script>
+
+    <!-- Local JS modules -->
+    <script type="module">
+        import "{{ url_for('static', filename='js/fbx-viewer.js') }}";
+        import "{{ url_for('static', filename='js/script.js') }}";
+    </script>
 </body>
-<!-- Azure Speech SDK (browser) - used for TTS + viseme events -->
-<script src="https://aka.ms/csspeech/jsbrowserpackageraw"></script>
-</html>
 </html>
