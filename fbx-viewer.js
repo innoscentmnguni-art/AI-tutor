@@ -49,37 +49,57 @@ if (!container) {
     // Scene and camera
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
-    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-    // Position camera closer to face level
-    camera.position.set(0, 1.6, 1.5);
+    
+    // Camera constants
+    const CAMERA_FOV = 45;
+    const CAMERA_NEAR = 0.1;
+    const CAMERA_FAR = 1000;
+    const CAMERA_START_X = -10; // Initial camera height
+    const CAMERA_START_Y = 80; // Initial camera height
+    const CAMERA_START_Z = 175; // Initial camera distance
+    
+    const camera = new THREE.PerspectiveCamera(CAMERA_FOV, container.clientWidth / container.clientHeight, CAMERA_NEAR, CAMERA_FAR);
+    camera.position.set(CAMERA_START_X, CAMERA_START_Y, CAMERA_START_Z);
 
     // Controls
+    // Control constants
+    const CONTROLS_MIN_DISTANCE = 20; // Minimum zoom distance
+    const CONTROLS_MAX_DISTANCE = 200; // Maximum zoom distance
+    const CONTROLS_MIN_POLAR_ANGLE = Math.PI * 0.1; // Limit looking up (5 degrees)
+    const CONTROLS_MAX_POLAR_ANGLE = Math.PI * 0.6; // Limit looking down (~108 degrees)
+    const CONTROLS_MIN_AZIMUTH = -Math.PI * 0.3; // Limit rotation left (-54 degrees)
+    const CONTROLS_MAX_AZIMUTH = Math.PI * 0.3; // Limit rotation right (54 degrees)
+    const PAN_SPEED = 10;
+    
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.5, 0); // Look at the face
-    controls.minDistance = 0.5; // Allow getting closer
-    controls.maxDistance = 4; // Limit how far you can zoom out
+    controls.target.set(10, 85, 0); // Look at the face
+    controls.minDistance = CONTROLS_MIN_DISTANCE;
+    controls.maxDistance = CONTROLS_MAX_DISTANCE;
+    controls.minPolarAngle = CONTROLS_MIN_POLAR_ANGLE; // Limit looking up
+    controls.maxPolarAngle = CONTROLS_MAX_POLAR_ANGLE; // Limit looking down
+    controls.minAzimuthAngle = CONTROLS_MIN_AZIMUTH; // Limit horizontal rotation left
+    controls.maxAzimuthAngle = CONTROLS_MAX_AZIMUTH; // Limit horizontal rotation right
     controls.enableDamping = true; // Smooth camera movements
     controls.dampingFactor = 0.05;
     
     // Add keyboard controls for panning
     window.addEventListener('keydown', (e) => {
-        const panSpeed = 0.1;
         switch(e.key) {
             case 'ArrowUp':
-                controls.target.y += panSpeed;
-                camera.position.y += panSpeed;
+                controls.target.y += PAN_SPEED;
+                camera.position.y += PAN_SPEED;
                 break;
             case 'ArrowDown':
-                controls.target.y -= panSpeed;
-                camera.position.y -= panSpeed;
+                controls.target.y -= PAN_SPEED;
+                camera.position.y -= PAN_SPEED;
                 break;
             case 'ArrowLeft':
-                controls.target.x -= panSpeed;
-                camera.position.x -= panSpeed;
+                controls.target.x -= PAN_SPEED;
+                camera.position.x -= PAN_SPEED;
                 break;
             case 'ArrowRight':
-                controls.target.x += panSpeed;
-                camera.position.x += panSpeed;
+                controls.target.x += PAN_SPEED;
+                camera.position.x += PAN_SPEED;
                 break;
         }
         controls.update();
@@ -108,76 +128,84 @@ if (!container) {
     const fbxLoader = new FBXLoader();
 
     // Paths — assumptions: files are in the same folder as index.html
+    const classroomPath = 'classroom.fbx';
     const modelPath = 'model.fbx';
     const animPath = 'model@idle.fbx';
 
+    // Load classroom first
+    fbxLoader.load(classroomPath, (classroomObj) => {
+        // Optionally scale/center classroom
+        classroomObj.position.set(0, 0, 0);
+        scene.add(classroomObj);
 
-    // Load base model first
-    fbxLoader.load(modelPath, (object) => {
-        // Center and scale model if needed
-        object.traverse(function (child) {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-                // Print all morph target names for debugging
-                if (child.morphTargetDictionary && child.morphTargetInfluences) {
-                    console.log('Checking mesh:', child.name);
-                    console.log('Has morphTargetInfluences:', !!child.morphTargetInfluences, 'Length:', child.morphTargetInfluences.length);
-                    
-                    // Check if this mesh has most of our visemes (to find the main face mesh)
-                    let visemeCount = 0;
-                    for (const v of visemeNames) {
-                        if (child.morphTargetDictionary[v] !== undefined) {
-                            visemeCount++;
-                        }
-                    }
-                    
-                    // If this mesh has more visemes than our current best, use it
-                    if (visemeCount > Object.keys(visemeMap).length) {
-                        visemeMap = {}; // Clear previous mappings
-                        console.log('Found better mesh with', visemeCount, 'visemes:', child.name);
-                        console.log('Morph targets:', Object.keys(child.morphTargetDictionary));
-                        
+        // Now load avatar model
+        fbxLoader.load(modelPath, (object) => {
+            // Center and scale model if needed
+            object.position.set(-20, 0, -50); // Place avatar slightly forward in classroom
+            object.scale.set(55, 55, 55); // Scale avatar up by a factor of 55
+            object.traverse(function (child) {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    // Print all morph target names for debugging
+                    if (child.morphTargetDictionary && child.morphTargetInfluences) {
+                        console.log('Checking mesh:', child.name);
+                        console.log('Has morphTargetInfluences:', !!child.morphTargetInfluences, 'Length:', child.morphTargetInfluences.length);
+                        // Check if this mesh has most of our visemes (to find the main face mesh)
+                        let visemeCount = 0;
                         for (const v of visemeNames) {
                             if (child.morphTargetDictionary[v] !== undefined) {
-                                visemeMap[v] = { mesh: child, index: child.morphTargetDictionary[v] };
-                                console.log('Mapped viseme:', v, 'to index:', child.morphTargetDictionary[v]);
+                                visemeCount++;
+                            }
+                        }
+                        // If this mesh has more visemes than our current best, use it
+                        if (visemeCount > Object.keys(visemeMap).length) {
+                            visemeMap = {}; // Clear previous mappings
+                            console.log('Found better mesh with', visemeCount, 'visemes:', child.name);
+                            console.log('Morph targets:', Object.keys(child.morphTargetDictionary));
+                            for (const v of visemeNames) {
+                                if (child.morphTargetDictionary[v] !== undefined) {
+                                    visemeMap[v] = { mesh: child, index: child.morphTargetDictionary[v] };
+                                    console.log('Mapped viseme:', v, 'to index:', child.morphTargetDictionary[v]);
+                                }
                             }
                         }
                     }
                 }
-            }
-            // Find jaw bone
-            if (child.isBone && !jawBone) {
-                const name = child.name.toLowerCase();
-                if (name.includes('jaw')) jawBone = child;
-            }
-        });
+                // Find jaw bone
+                if (child.isBone && !jawBone) {
+                    const name = child.name.toLowerCase();
+                    if (name.includes('jaw')) jawBone = child;
+                }
+            });
 
-        // Add model to scene
-        scene.add(object);
+            // Add avatar to scene (inside classroom)
+            scene.add(object);
 
-        // Attempt to load the animation file
-        fbxLoader.load(animPath, (anim) => {
-            // Create mixer on the model
-            mixer = new THREE.AnimationMixer(object);
+            // Attempt to load the animation file
+            fbxLoader.load(animPath, (anim) => {
+                // Create mixer on the model
+                mixer = new THREE.AnimationMixer(object);
+                // FBX animation sometimes stores animations in anim.animations
+                const clip = anim.animations && anim.animations.length ? anim.animations[0] : null;
+                if (clip) {
+                    const action = mixer.clipAction(clip);
+                    action.play();
+                } else if (anim && anim.animations && anim.animations.length === 0) {
+                    console.warn('Animation file loaded but contained no clips.');
+                } else {
+                    console.warn('No animation clip found in animation FBX');
+                }
+            }, undefined, (err) => {
+                console.error('Failed to load animation FBX:', err);
+            });
 
-            // FBX animation sometimes stores animations in anim.animations
-            const clip = anim.animations && anim.animations.length ? anim.animations[0] : null;
-            if (clip) {
-                const action = mixer.clipAction(clip);
-                action.play();
-            } else if (anim && anim.animations && anim.animations.length === 0) {
-                console.warn('Animation file loaded but contained no clips.');
-            } else {
-                console.warn('No animation clip found in animation FBX');
-            }
-        }, undefined, (err) => {
-            console.error('Failed to load animation FBX:', err);
+        }, undefined, (error) => {
+            console.error('Error loading model FBX:', error);
         });
 
     }, undefined, (error) => {
-        console.error('Error loading model FBX:', error);
+        console.error('Error loading classroom FBX:', error);
     });
 
     // Resize handling
