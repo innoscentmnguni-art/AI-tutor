@@ -20,18 +20,26 @@ class GazeClient {
     }
 
     _buildUI(){
+        // Create a horizontal controls wrapper so buttons sit side-by-side
+        this.controlsWrap = document.createElement('div');
+        // Use Bootstrap utility classes for horizontal layout and spacing
+        this.controlsWrap.className = 'd-flex gap-2 mt-2';
+
         // Calibrate button
         this.calibrateBtn = document.createElement('button');
         this.calibrateBtn.textContent = 'Calibrate';
-        this.calibrateBtn.className = 'btn btn-warning mt-2';
+        this.calibrateBtn.className = 'btn btn-warning';
         this.calibrateBtn.disabled = true;
-        this.container.appendChild(this.calibrateBtn);
 
         // Toggle button
         this.toggleBtn = document.createElement('button');
         this.toggleBtn.textContent = 'Turn On';
-        this.toggleBtn.className = 'btn btn-secondary mt-2 ms-2';
-        this.container.appendChild(this.toggleBtn);
+        this.toggleBtn.className = 'btn btn-secondary';
+
+        // Append buttons to the wrapper, then wrapper to container
+        this.controlsWrap.appendChild(this.calibrateBtn);
+        this.controlsWrap.appendChild(this.toggleBtn);
+        this.container.appendChild(this.controlsWrap);
     }
 
     _bindEvents(){
