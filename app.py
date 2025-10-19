@@ -1,4 +1,8 @@
 from flask import Flask, render_template, request, jsonify, send_file
+import base64
+import cv2
+import numpy as np
+from gaze_tracking import ScreenEngagementDetector
 import azure.cognitiveservices.speech as speechsdk
 import google.generativeai as genai
 import os
@@ -13,6 +17,47 @@ import io
 load_dotenv()
 
 app = Flask(__name__)
+
+# Initialize gaze detector
+gaze_detector = ScreenEngagementDetector()
+@app.route('/gaze', methods=['POST'])
+def gaze():
+    data = request.json
+    frame_data = data.get('frame')
+    calibrate = data.get('calibrate', False)
+    if not frame_data:
+        return jsonify({'error': 'No frame provided'}), 400
+
+    # Decode base64 image
+    try:
+        img_bytes = base64.b64decode(frame_data)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    except Exception as e:
+        return jsonify({'error': 'Failed to decode image', 'details': str(e)}), 400
+
+    # Calibrate if requested
+    if calibrate:
+        h, w = frame.shape[:2]
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = gaze_detector.face_mesh.process(frame_rgb)
+        if results.multi_face_landmarks:
+            face_landmarks = results.multi_face_landmarks[0].landmark
+            head_center, R_final, nose_points_3d = gaze_detector.compute_head_pose(face_landmarks, w, h)
+            gaze_detector.calibrate(face_landmarks, head_center, R_final, nose_points_3d, w, h)
+
+    # Process frame
+    processed_frame, engaged, gaze_angle = gaze_detector.process_frame(frame)
+
+    # Encode processed frame to base64
+    _, buffer = cv2.imencode('.jpg', processed_frame)
+    processed_b64 = base64.b64encode(buffer).decode('utf-8')
+
+    return jsonify({
+        'processed_frame': processed_b64,
+        'engaged': engaged,
+        'gaze_angle': gaze_angle
+    })
 
 # Configure API keys
 SPEECH_KEY = os.getenv("SPEECH_KEY")
