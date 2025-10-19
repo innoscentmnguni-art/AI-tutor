@@ -5,6 +5,9 @@ import os
 import tempfile
 import uuid
 from dotenv import load_dotenv
+from PIL import Image
+import matplotlib.pyplot as plt
+import io
 
 # Load environment variables
 load_dotenv()
@@ -23,9 +26,23 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 # System prompt for the tutor persona — concise, friendly, and student-focused.
 # The model should keep answers short, conversational, and aim to teach clearly.
 SYSTEM_PROMPT = (
-    "You are an AI tutor. Respond concisely and directly as if speaking to a student. "
-    "Use short sentences, give one clear answer or step at a time, and offer a brief example when helpful. "
-    "If the user asks for further detail, wait for their follow-up. Keep tone friendly and encouraging."
+    "You are an AI tutor. Structure your responses with two distinct parts:\n"
+    "1. BOARD: Start with text between BOARD[...] markers for what to show on the board\n"
+    "2. SPEAK: Follow with what you want to say, explaining concepts\n\n"
+    "Example for an equation:\n"
+    "BOARD[Straight Line Equation:\n\ny = mx + c]\n"
+    "SPEAK: I've written the equation of a straight line on the board. This is the general form where m represents the slope "
+    "and c is where the line crosses the y-axis.\n\n"
+    "Example for steps:\n"
+    "BOARD[Steps to Solve:\n\n1. First, identify the variables\n2. Then, substitute the values\n3. Finally, solve the equation]\n"
+    "SPEAK: Let me guide you through these steps one by one...\n\n"
+    "Guidelines:\n"
+    "- Put board text between BOARD[...]\n"
+    "- Use line breaks (\\n) to separate lines on the board\n"
+    "- Keep each line short and clear\n"
+    "- Start equations on a new line\n"
+    "- After SPEAK:, explain concepts naturally\n"
+    "- Keep explanations concise and student-friendly"
 )
 
 def text_to_speech(text):
@@ -72,6 +89,26 @@ def generate_response(prompt):
             print(f"Status code: {e.status_code}")
         return None
 
+
+def render_latex_to_file(latex):
+    # Renders LaTeX string to a PNG file and returns the file path
+    try:
+        fig = plt.figure(figsize=(12, 4))  # Wider figure for equations
+        fig.text(0.5, 0.5, f"${latex}$", fontsize=36, horizontalalignment='center', verticalalignment='center')
+        buf = io.BytesIO()
+        fig.patch.set_alpha(0)
+        plt.axis('off')
+        fig.savefig(buf, format='png', dpi=300, bbox_inches='tight', pad_inches=0.2, transparent=True)
+        plt.close(fig)
+        buf.seek(0)
+        filename = os.path.join(tempfile.gettempdir(), f"latex_{uuid.uuid4()}.png")
+        with open(filename, 'wb') as f:
+            f.write(buf.read())
+        return filename
+    except Exception as e:
+        print('Failed to render LaTeX:', e)
+        return None
+
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
     data = request.json
@@ -85,16 +122,58 @@ def synthesize():
     if not ai_response:
         return jsonify({'error': 'Failed to generate AI response'}), 500
 
-    # Convert AI response to speech
-    audio_file, visemes = text_to_speech(ai_response)
+    # Extract board text and spoken text
+    import re
+    board_match = re.search(r"BOARD\[(.*?)\]", ai_response, flags=re.DOTALL)
+    board_text = board_match.group(1).strip() if board_match else ""
+    
+    # Extract the spoken part (after "SPEAK:")
+    speak_match = re.search(r"SPEAK:\s*(.+)$", ai_response, flags=re.DOTALL)
+    spoken_text = speak_match.group(1).strip() if speak_match else ai_response
+
+    # Convert spoken text to speech
+    audio_file, visemes = text_to_speech(spoken_text)
     if audio_file:
-        return jsonify({
+        resp = {
             'success': True,
             'audio_url': f'/audio/{os.path.basename(audio_file)}',
-            'visemes': visemes
-        })
+            'visemes': visemes,
+            'board_text': board_text  # Send the board text to display
+        }
+        return jsonify(resp)
     else:
         return jsonify({'error': 'Failed to synthesize speech'}), 500
+
+
+@app.route('/render_latex', methods=['POST'])
+def render_latex():
+    data = request.json or {}
+    latex = data.get('latex', '')
+    if not latex:
+        return jsonify({'error': 'No LaTeX provided'}), 400
+
+    # Render LaTeX to PNG using matplotlib
+    try:
+        fig = plt.figure()
+        fig.text(0, 0.9, f"${latex}$", fontsize=20)
+        buf = io.BytesIO()
+        fig.patch.set_alpha(0)
+        plt.axis('off')
+        fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', pad_inches=0.1, transparent=True)
+        plt.close(fig)
+        buf.seek(0)
+        filename = os.path.join(tempfile.gettempdir(), f"latex_{uuid.uuid4()}.png")
+        with open(filename, 'wb') as f:
+            f.write(buf.read())
+        return jsonify({'url': f'/latex/{os.path.basename(filename)}'})
+    except Exception as e:
+        print('Failed to render LaTeX:', e)
+        return jsonify({'error': 'Render failed'}), 500
+
+
+@app.route('/latex/<filename>')
+def serve_latex(filename):
+    return send_file(os.path.join(tempfile.gettempdir(), filename))
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):

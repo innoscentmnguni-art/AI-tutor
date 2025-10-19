@@ -59,6 +59,14 @@ document.addEventListener('DOMContentLoaded', function () {
             const data = await response.json();
             
             if (data.success) {
+                // If server provided board text, update the board using the same method as sample text
+                if (data.board_text && window.updateSampleText) {
+                    try {
+                        window.updateSampleText(data.board_text);
+                    } catch (e) {
+                        console.error('Failed to update board text', e);
+                    }
+                }
                 // Use lipsync module if morph mesh and viseme map are available
                 if (window.avatarMorphMesh && window.avatarVisemeMap) {
                     await playAudioWithLipSync(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap);
