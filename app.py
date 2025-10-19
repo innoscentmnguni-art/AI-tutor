@@ -1,14 +1,24 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import azure.cognitiveservices.speech as speechsdk
+import google.generativeai as genai
 import os
 import tempfile
 import uuid
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 
-# Replace with your Azure Speech Service subscription key and region
-SPEECH_KEY = ""
-SPEECH_REGION = ""
+# Configure API keys
+SPEECH_KEY = os.getenv("SPEECH_KEY")
+SPEECH_REGION = os.getenv("SPEECH_REGION")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Configure Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-pro-latest')
 
 def text_to_speech(text):
     speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
@@ -37,15 +47,35 @@ def text_to_speech(text):
 def home():
     return render_template('index.html')
 
+def generate_response(prompt):
+    try:
+        response = model.generate_content(prompt)
+        if response and hasattr(response, 'text'):
+            return response.text
+        else:
+            print("No valid response received from the model")
+            return None
+    except Exception as e:
+        print(f"Error generating response: {str(e)}")
+        if hasattr(e, 'status_code'):
+            print(f"Status code: {e.status_code}")
+        return None
+
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
     data = request.json
-    text = data.get('text', '')
+    user_input = data.get('text', '')
 
-    if not text:
+    if not user_input:
         return jsonify({'error': 'No text provided'}), 400
 
-    audio_file, visemes = text_to_speech(text)
+    # Generate AI response
+    ai_response = generate_response(user_input)
+    if not ai_response:
+        return jsonify({'error': 'Failed to generate AI response'}), 500
+
+    # Convert AI response to speech
+    audio_file, visemes = text_to_speech(ai_response)
     if audio_file:
         return jsonify({
             'success': True,
