@@ -44,6 +44,8 @@ class AppController {
         this.ttsSendButton = document.getElementById('tts-send-btn') || (this.ttsForm ? this.ttsForm.querySelector('button') : null);
         this.ttsMicButton = document.getElementById('tts-mic-btn');
         this.isPlaying = false;
+        // Tracks whether AI request or avatar playback is in progress.
+        this._promptInProgress = false;
     }
 
     init(){
@@ -51,6 +53,43 @@ class AppController {
         this._bindThemeToggle();
         this._bindTTS();
         this._bindMicToggle();
+        // Play onboarding greeting from server (Nova) before accepting user prompts
+        this._fetchAndPlayGreeting();
+    }
+
+    async _fetchAndPlayGreeting(){
+        // If the server provides a greeting, play it with lipsync and update the board text.
+        try {
+            this._promptInProgress = true;
+            if (this.ttsSendButton) {
+                this.ttsSendButton.disabled = true;
+                this._setSendButtonSpinner(true);
+            }
+            const res = await fetch('/greeting');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.board_text && window.updateSampleText){
+                try { window.updateSampleText(data.board_text); } catch(e){ console.error('Failed to update board text', e); }
+            }
+            if (data.audio_url){
+                const audio = new Audio(data.audio_url);
+                if (window.avatarMorphMesh && window.avatarVisemeMap){
+                    // lipsync will use provided audio element when available
+                    playAudioWithLipSync(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap, audio);
+                }
+                // start playback and wait for true end
+                await audio.play();
+                await waitForAudioTrueEnd(audio, 1500);
+            }
+        } catch (e){
+            console.error('Error fetching/playing greeting:', e);
+        } finally {
+            if (this.ttsSendButton) {
+                this.ttsSendButton.disabled = false;
+                this._setSendButtonSpinner(false);
+            }
+            this._promptInProgress = false;
+        }
     }
 
     _initTheme(){

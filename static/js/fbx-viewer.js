@@ -184,7 +184,7 @@ class FBXViewer {
 
     _createSampleBoard(object){
         try{
-            const initialText = 'Sample Text';
+            const initialText = 'Welcome\nMy name is Nova\nwhat would you like to learn today';
             const boardWidth = 130; const boardHeight = 65;
             const sampleTex = this._createTextTexture(initialText, 2048, 1024);
             const boardMat = new THREE.MeshBasicMaterial({ map: sampleTex, transparent: true, side: THREE.DoubleSide });

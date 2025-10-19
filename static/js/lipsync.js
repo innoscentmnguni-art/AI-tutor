@@ -13,8 +13,9 @@ function _applyViseme(morphMesh, visemeMap, visemeId){
     if (typeof morphIdx !== 'undefined') morphMesh.morphTargetInfluences[morphIdx] = 1.0;
 }
 
-export async function playAudioWithLipSync(audioUrl, visemes, morphMesh, visemeMap){
-    const audio = new Audio(audioUrl);
+export async function playAudioWithLipSync(audioUrl, visemes, morphMesh, visemeMap, externalAudio){
+    // If caller passes an external Audio element, use it; otherwise create our own.
+    const audio = externalAudio || new Audio(audioUrl);
     let startTime = null;
     let visemeIdx = 0;
     let raf = null;
@@ -42,5 +43,9 @@ export async function playAudioWithLipSync(audioUrl, visemes, morphMesh, visemeM
         _applyViseme(morphMesh, visemeMap, 0);
     });
 
-    await audio.play();
+    // If the caller provided an external Audio element, they will start playback.
+    // Only start playback here when we created the audio internally.
+    if (!externalAudio) {
+        await audio.play();
+    }
 }

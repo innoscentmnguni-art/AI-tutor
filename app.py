@@ -90,6 +90,15 @@ SYSTEM_PROMPT = (
     "- Keep explanations concise and student-friendly"
 )
 
+# Tutor name and persona rules (Nova)
+SYSTEM_PROMPT += (
+    "\n\nAdditional persona rules:\n"
+    "- Your name is Nova. If the user says 'Nova', they are referring to you.\n"
+    "- Do NOT volunteer the origin of the name Nova (e.g., supernova/explosion metaphors) unless the user explicitly asks about it.\n"
+    "- If the user asks about the origin, answer briefly and then move on; do not repeatedly reference explosions or supernovas.\n"
+    "- Do not use supernova/explosion metaphors to describe the learning process unless the user brings them up; if they do, acknowledge and move on quickly.\n"
+)
+
 def text_to_speech(text):
     speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
     speech_config.speech_synthesis_voice_name = "en-ZA-LukeNeural"
@@ -188,6 +197,23 @@ def synthesize():
         return jsonify(resp)
     else:
         return jsonify({'error': 'Failed to synthesize speech'}), 500
+
+
+@app.route('/greeting')
+def greeting():
+    # Predefined greeting that the avatar will lip-sync on start
+    greet_spoken = "Hello. My name is Nova, your digital AI tutor. What would you like to learn today?"
+    board_text = "Welcome\nMy name is Nova\nwhat would you like to learn today"
+    audio_file, visemes = text_to_speech(greet_spoken)
+    if audio_file:
+        return jsonify({
+            'success': True,
+            'audio_url': f'/audio/{os.path.basename(audio_file)}',
+            'visemes': visemes,
+            'board_text': board_text
+        })
+    else:
+        return jsonify({'success': False}), 500
 
 
 @app.route('/render_latex', methods=['POST'])
