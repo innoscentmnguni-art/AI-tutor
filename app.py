@@ -18,7 +18,15 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Configure Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-pro-latest')
+model = genai.GenerativeModel('gemini-2.5-flash')
+
+# System prompt for the tutor persona — concise, friendly, and student-focused.
+# The model should keep answers short, conversational, and aim to teach clearly.
+SYSTEM_PROMPT = (
+    "You are an AI tutor. Respond concisely and directly as if speaking to a student. "
+    "Use short sentences, give one clear answer or step at a time, and offer a brief example when helpful. "
+    "If the user asks for further detail, wait for their follow-up. Keep tone friendly and encouraging."
+)
 
 def text_to_speech(text):
     speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
@@ -49,7 +57,10 @@ def home():
 
 def generate_response(prompt):
     try:
-        response = model.generate_content(prompt)
+        # Prepend system prompt to guide model behavior. Gemini client expects text content,
+        # so send a single concatenated string rather than a custom dict.
+        combined_prompt = SYSTEM_PROMPT + "\n\nUser: " + str(prompt)
+        response = model.generate_content(combined_prompt)
         if response and hasattr(response, 'text'):
             return response.text
         else:
