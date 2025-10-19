@@ -1,47 +1,46 @@
 // lipsync.js - Handles avatar mouth morphing using viseme data from backend
 // Usage: import { playAudioWithLipSync } from './lipsync.js';
 
-export async function playAudioWithLipSync(audioUrl, visemes, morphMesh, visemeMap) {
+function _resetMorphs(morphMesh){
+    if (!morphMesh || !morphMesh.morphTargetInfluences) return;
+    for (let i = 0; i < morphMesh.morphTargetInfluences.length; i++) morphMesh.morphTargetInfluences[i] = 0;
+}
+
+function _applyViseme(morphMesh, visemeMap, visemeId){
+    if (!morphMesh || !morphMesh.morphTargetInfluences) return;
+    _resetMorphs(morphMesh);
+    const morphIdx = visemeMap[visemeId];
+    if (typeof morphIdx !== 'undefined') morphMesh.morphTargetInfluences[morphIdx] = 1.0;
+}
+
+export async function playAudioWithLipSync(audioUrl, visemes, morphMesh, visemeMap){
     const audio = new Audio(audioUrl);
     let startTime = null;
     let visemeIdx = 0;
-    let animationFrameId = null;
+    let raf = null;
 
-    function setMorphTarget(visemeId) {
-        if (!morphMesh || !morphMesh.morphTargetInfluences) return;
-        for (let i = 0; i < morphMesh.morphTargetInfluences.length; i++) {
-            morphMesh.morphTargetInfluences[i] = 0;
-        }
-        const morphIdx = visemeMap[visemeId];
-        if (typeof morphIdx !== 'undefined') {
-            morphMesh.morphTargetInfluences[morphIdx] = 1.0;
-        }
+    function _advanceViseme(elapsed){
+        while (visemeIdx < visemes.length - 1 && elapsed >= visemes[visemeIdx + 1].offset) visemeIdx++;
+        _applyViseme(morphMesh, visemeMap, visemes[visemeIdx].viseme_id);
     }
 
-    function animateLipSync(now) {
+    function _loop(now){
         if (!startTime) startTime = now;
         const elapsed = now - startTime;
-        while (visemeIdx < visemes.length - 1 && elapsed >= visemes[visemeIdx + 1].offset) {
-            visemeIdx++;
-        }
-        setMorphTarget(visemes[visemeIdx].viseme_id);
-        if (!audio.paused && !audio.ended) {
-            animationFrameId = requestAnimationFrame(animateLipSync);
-        } else {
-            setMorphTarget(0);
-        }
+        _advanceViseme(elapsed);
+        if (!audio.paused && !audio.ended) raf = requestAnimationFrame(_loop);
+        else _applyViseme(morphMesh, visemeMap, 0);
     }
 
-    // Only start lip sync when audio actually starts playing
-    audio.addEventListener('play', () => {
+    audio.addEventListener('play', ()=>{
         startTime = performance.now();
         visemeIdx = 0;
-        animationFrameId = requestAnimationFrame(animateLipSync);
+        raf = requestAnimationFrame(_loop);
     });
-    audio.addEventListener('ended', () => {
-        if (animationFrameId) cancelAnimationFrame(animationFrameId);
-        setMorphTarget(0);
+    audio.addEventListener('ended', ()=>{
+        if (raf) cancelAnimationFrame(raf);
+        _applyViseme(morphMesh, visemeMap, 0);
     });
-    // Wait for audio to be ready before playing
+
     await audio.play();
 }

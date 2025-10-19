@@ -89,6 +89,26 @@ class ScreenEngagementDetector:
                     R_final[:, i] *= -1
         return center, R_final, points_3d
 
+    def _nose_points_3d(self, face_landmarks, w, h):
+        """Return nose region points as 3D numpy array."""
+        return np.array([[face_landmarks[i].x * w, face_landmarks[i].y * h, face_landmarks[i].z * w]
+                        for i in self.nose_indices])
+
+    def _compute_scale_ratios(self, nose_points_3d):
+        """Compute current nose scale and ratios against calibration scales."""
+        current_nose_scale = self.compute_scale(nose_points_3d)
+        scale_ratio_l = current_nose_scale / self.left_calibration_nose_scale
+        scale_ratio_r = current_nose_scale / self.right_calibration_nose_scale
+        return scale_ratio_l, scale_ratio_r
+
+    def _compute_spheres_and_radii(self, head_center, R_final, scale_ratio_l, scale_ratio_r):
+        """Compute world-space sphere centers for left/right eyes and scaled radii."""
+        sphere_world_l = head_center + R_final @ (self.left_sphere_local_offset * scale_ratio_l)
+        sphere_world_r = head_center + R_final @ (self.right_sphere_local_offset * scale_ratio_r)
+        scaled_radius_l = int(self.base_radius * scale_ratio_l)
+        scaled_radius_r = int(self.base_radius * scale_ratio_r)
+        return sphere_world_l, sphere_world_r, scaled_radius_l, scaled_radius_r
+
     def calibrate(self, face_landmarks, head_center, R_final, nose_points_3d, w, h):
         current_nose_scale = self.compute_scale(nose_points_3d)
         left_iris = face_landmarks[468]
@@ -198,8 +218,8 @@ class ScreenEngagementDetector:
         return smoothed_gaze, left_gaze_dir, right_gaze_dir
 
     def _draw_gaze_visualization(self, frame, sphere_world_l, sphere_world_r, 
-                               smoothed_gaze, left_gaze_dir, right_gaze_dir, 
-                               is_looking_at_screen):
+                            smoothed_gaze, left_gaze_dir, right_gaze_dir, 
+                            is_looking_at_screen):
         """Draw gaze visualization lines and indicators on frame."""
         gaze_origin = (sphere_world_l + sphere_world_r) / 2
         gaze_end = gaze_origin + smoothed_gaze * 200
@@ -223,9 +243,9 @@ class ScreenEngagementDetector:
                                 scaled_radius_l, scaled_radius_r):
         """Draw eye calibration spheres on frame."""
         cv2.circle(frame, (int(sphere_world_l[0]), int(sphere_world_l[1])), 
-                  scaled_radius_l, (255, 255, 0), 2)
+                scaled_radius_l, (255, 255, 0), 2)
         cv2.circle(frame, (int(sphere_world_r[0]), int(sphere_world_r[1])), 
-                  scaled_radius_r, (0, 255, 255), 2)
+                scaled_radius_r, (0, 255, 255), 2)
 
     def _draw_uncalibrated_state(self, frame, iris_3d_left, iris_3d_right):
         """Draw indicators for uncalibrated state."""
@@ -267,7 +287,7 @@ class ScreenEngagementDetector:
         scaled_radius_r = int(self.base_radius * scale_ratio_r)
         
         self._draw_calibration_spheres(frame, sphere_world_l, sphere_world_r, 
-                                     scaled_radius_l, scaled_radius_r)
+                                    scaled_radius_l, scaled_radius_r)
         
         # Compute and visualize gaze
         smoothed_gaze, left_gaze_dir, right_gaze_dir = self._compute_gaze_direction(

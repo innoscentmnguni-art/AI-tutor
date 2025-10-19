@@ -1,146 +1,191 @@
-// Gaze client: capture webcam, send frames to /gaze, handle calibration, and update UI
+// Gaze client: class-based, small methods, separation of concerns
 
-const video = document.getElementById('webcam');
-const processedImg = document.getElementById('processed-frame');
-const statusEl = document.getElementById('engagement-status');
-let streaming = false;
-let sendInterval = 200; // ms between frames
-let calibrateNext = false;
-let trackingEnabled = false; // start OFF by default
+class GazeClient {
+    constructor({videoId='webcam', processedImgId='processed-frame', statusId='engagement-status', containerId='engagement-visuals'}){
+        this.video = document.getElementById(videoId);
+        this.processedImg = document.getElementById(processedImgId);
+        this.statusEl = document.getElementById(statusId);
+        this.container = document.getElementById(containerId);
 
-async function startWebcam() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
-        video.srcObject = stream;
-        await video.play();
-        streaming = true;
-        pollFrames();
-    } catch (e) {
-        console.error('Webcam start failed', e);
-        statusEl.textContent = 'Status: Webcam error';
+        this.streaming = false;
+        this.trackingEnabled = false; // start off
+        this.calibrateNext = false;
+        this.sendInterval = 200; // ms
+        this._lastSend = 0;
+
+        this._rafHandle = null;
+
+        this._buildUI();
+        this._bindEvents();
     }
-}
 
-function captureFrameAsJpeg() {
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg').split(',')[1]; // base64 without prefix
-}
+    _buildUI(){
+        // Calibrate button
+        this.calibrateBtn = document.createElement('button');
+        this.calibrateBtn.textContent = 'Calibrate';
+        this.calibrateBtn.className = 'btn btn-warning mt-2';
+        this.calibrateBtn.disabled = true;
+        this.container.appendChild(this.calibrateBtn);
 
-let lastSend = 0;
-async function pollFrames() {
-    if (!streaming) return;
-    const now = performance.now();
-    if (now - lastSend >= sendInterval) {
-        lastSend = now;
-        // If tracking is disabled, skip sending frames
-        if (!trackingEnabled) {
-            requestAnimationFrame(pollFrames);
+        // Toggle button
+        this.toggleBtn = document.createElement('button');
+        this.toggleBtn.textContent = 'Turn On';
+        this.toggleBtn.className = 'btn btn-secondary mt-2 ms-2';
+        this.container.appendChild(this.toggleBtn);
+    }
+
+    _bindEvents(){
+        this.calibrateBtn.addEventListener('click', () => this._onCalibrateClick());
+        this.toggleBtn.addEventListener('click', () => this._onToggleClick());
+        window.addEventListener('unload', () => this.stop());
+    }
+
+    async _onToggleClick(){
+        const enable = !this.trackingEnabled;
+        this.setTrackingEnabled(enable);
+        if (enable){
+            this.setStatus('Starting eye tracking...', '#2b8a3e');
+            try {
+                await this.startWebcam();
+                this.setStatus('Initializing...', '#2b8a3e');
+            } catch (err){
+                console.error('Webcam failed', err);
+                this.setStatus('Webcam failed', '#8a2222');
+            }
+        } else {
+            this.stopWebcam();
+            this.setStatus('Eye tracking off', '#666');
+            this.hideProcessedImage();
+        }
+    }
+
+    _onCalibrateClick(){
+        if (!this.trackingEnabled){
+            this._flashButtonMessage(this.calibrateBtn, 'Turn on tracking first', 1200);
             return;
         }
+        this.calibrateNext = true;
+        this._flashButtonMessage(this.calibrateBtn, 'Calibrating...', 1200);
+    }
 
-        const b64 = captureFrameAsJpeg();
-        try {
+    _flashButtonMessage(btn, msg, ms){
+        const orig = btn.textContent;
+        btn.textContent = msg;
+        setTimeout(()=> btn.textContent = orig, ms);
+    }
+
+    setTrackingEnabled(enable){
+        this.trackingEnabled = enable;
+        this.calibrateBtn.disabled = !enable;
+        this.toggleBtn.textContent = enable ? 'Turn Off' : 'Turn On';
+        if (enable && !this._rafHandle){
+            this._rafHandle = requestAnimationFrame(()=> this._pollLoop());
+        }
+    }
+
+    async startWebcam(){
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+        this.video.srcObject = stream;
+        await this.video.play();
+        this.streaming = true;
+        if (!this._rafHandle) this._rafHandle = requestAnimationFrame(()=> this._pollLoop());
+    }
+
+    stopWebcam(){
+        try{
+            const stream = this.video.srcObject;
+            if (stream){
+                stream.getTracks().forEach(t => t.stop());
+            }
+        }catch(e){ console.warn('Error stopping camera', e); }
+        this.video.srcObject = null;
+        this.streaming = false;
+    }
+
+    stop(){
+        this.setTrackingEnabled(false);
+        if (this._rafHandle) cancelAnimationFrame(this._rafHandle);
+        this._rafHandle = null;
+        this.stopWebcam();
+    }
+
+    captureFrameAsJpeg(){
+        const canvas = document.createElement('canvas');
+        canvas.width = this.video.videoWidth || 640;
+        canvas.height = this.video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(this.video, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg').split(',')[1];
+    }
+
+    async _sendFrame(base64){
+        const payload = { frame: base64, calibrate: this.calibrateNext };
+        this.calibrateNext = false;
+        try{
             const resp = await fetch('/gaze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame: b64, calibrate: calibrateNext })
+                body: JSON.stringify(payload)
             });
-            calibrateNext = false;
-            if (resp.ok) {
-                const data = await resp.json();
-                if (data.processed_frame) {
-                    processedImg.src = 'data:image/jpeg;base64,' + data.processed_frame;
-                    processedImg.style.display = 'block';
-                }
-                // Update gaze angle display
-                const angleEl = document.getElementById('gaze-angle');
-                if (angleEl) {
-                    angleEl.textContent = data.gaze_angle != null ? `Gaze Angle: ${data.gaze_angle.toFixed(1)}°` : 'Gaze Angle: --';
-                }
-
-                // Update status button/label
-                statusEl.textContent = data.engaged ? 'ENGAGED' : 'NOT ENGAGED';
-                statusEl.style.background = data.engaged ? '#2b8a3e' : '#8a2222';
-            } else {
-                const err = await resp.text();
-                console.warn('Gaze endpoint error', err);
+            if (!resp.ok){
+                const txt = await resp.text();
+                console.warn('Gaze endpoint error', txt);
+                return null;
             }
-        } catch (e) {
+            return await resp.json();
+        }catch(e){
             console.error('Error sending frame', e);
+            return null;
         }
     }
-    requestAnimationFrame(pollFrames);
-}
 
-function calibrate() {
-    calibrateNext = true;
+    _updateFromResponse(data){
+        if (!data) return;
+        if (data.processed_frame){
+            this.processedImg.src = 'data:image/jpeg;base64,' + data.processed_frame;
+            this.processedImg.style.display = 'block';
+        }
+        const angleEl = document.getElementById('gaze-angle');
+        if (angleEl) angleEl.textContent = data.gaze_angle != null ? `Gaze Angle: ${data.gaze_angle.toFixed(1)}°` : 'Gaze Angle: --';
+        this.setStatus(data.engaged ? 'ENGAGED' : 'NOT ENGAGED', data.engaged ? '#2b8a3e' : '#8a2222');
+    }
+
+    hideProcessedImage(){
+        if (this.processedImg) this.processedImg.style.display = 'none';
+    }
+
+    setStatus(text, bg){
+        if (!this.statusEl) return;
+        this.statusEl.textContent = text;
+        if (bg) this.statusEl.style.background = bg;
+    }
+
+    async _pollLoop(){
+        if (!this.streaming){
+            this._rafHandle = null;
+            return;
+        }
+
+        const now = performance.now();
+        if (now - this._lastSend >= this.sendInterval){
+            this._lastSend = now;
+            if (this.trackingEnabled){
+                const b64 = this.captureFrameAsJpeg();
+                const res = await this._sendFrame(b64);
+                this._updateFromResponse(res);
+            }
+        }
+
+        this._rafHandle = requestAnimationFrame(()=> this._pollLoop());
+    }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Don't auto-start webcam; tracking is initially off
-    // Create calibrate button
-    const btn = document.createElement('button');
-    btn.textContent = 'Calibrate';
-    btn.className = 'btn btn-warning mt-2';
-    btn.onclick = () => {
-        if (!trackingEnabled) {
-            // brief feedback
-            btn.textContent = 'Turn on tracking first';
-            setTimeout(() => btn.textContent = 'Calibrate', 1200);
-            return;
-        }
-        calibrate();
-        btn.textContent = 'Calibrating...';
-        setTimeout(() => btn.textContent = 'Calibrate', 1200);
-    };
-    const container = document.getElementById('engagement-visuals');
-    container.appendChild(btn);
-
-    // Create tracking toggle button (starts OFF)
-    const toggle = document.createElement('button');
-    toggle.textContent = 'Turn On';
-    toggle.className = 'btn btn-secondary mt-2 ms-2';
-    toggle.onclick = async () => {
-        trackingEnabled = !trackingEnabled;
-        toggle.textContent = trackingEnabled ? 'Turn Off' : 'Turn On';
-
-        // Enable/disable calibrate button
-        btn.disabled = !trackingEnabled;
-
-        if (trackingEnabled) {
-            // Start webcam and indicate starting state
-            statusEl.textContent = 'Starting eye tracking...';
-            statusEl.style.background = '#2b8a3e';
-            try {
-                await startWebcam();
-                statusEl.textContent = 'Initializing...';
-            } catch (e) {
-                statusEl.textContent = 'Webcam failed';
-                statusEl.style.background = '#8a2222';
-            }
-        } else {
-            // Turn off: stop camera tracks and update UI
-            try {
-                const stream = video.srcObject;
-                if (stream) {
-                    const tracks = stream.getTracks();
-                    tracks.forEach(t => t.stop());
-                }
-            } catch (e) {
-                console.warn('Error stopping camera', e);
-            }
-            video.srcObject = null;
-            streaming = false;
-            processedImg.style.display = 'none';
-            statusEl.textContent = 'Eye tracking off';
-            statusEl.style.background = '#666';
-        }
-    };
-    // Calibrate button should be disabled when tracking is off
-    btn.disabled = true;
-    container.appendChild(toggle);
+    // Create client instance and keep reference globally for debugging
+    window.gazeClient = new GazeClient({
+        videoId: 'webcam',
+        processedImgId: 'processed-frame',
+        statusId: 'engagement-status',
+        containerId: 'engagement-visuals'
+    });
 });
