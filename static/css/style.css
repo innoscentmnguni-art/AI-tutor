@@ -14,3 +14,22 @@
     /* slightly larger on small screens as well */
     .black-box { width: 96%; height: 48vh; }
 }
+
+@media (min-width: 1920px) {
+    /* wider on large screens like gaming monitors */
+    .black-box { max-width: 1600px; }
+}
+
+/* ensure the inner FBX container fills the black-box so the renderer has non-zero size */
+#fbx-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+/* ensure the canvas created by Three.js stretches to the container */
+#fbx-container canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
