@@ -128,7 +128,7 @@
 
 {% endblock %}
 {% block scripts %}
-    <!-- Three.js import map -->
+    <!-- Local JS modules -->
     <script type="importmap">
     {
         "imports": {
@@ -142,5 +142,4 @@
         import "{{ url_for('static', filename='js/fbx-viewer.js') }}";
         import "{{ url_for('static', filename='js/script.js') }}";
     </script>
-    <script src="{{ url_for('static', filename='js/gaze-client.js') }}"></script>
 {% endblock %}

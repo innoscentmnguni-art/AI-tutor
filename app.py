@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 import base64
 import cv2
 import numpy as np
@@ -17,6 +17,7 @@ import io
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24) # For session management
 
 # Initialize gaze detector
 gaze_detector = ScreenEngagementDetector()
@@ -27,6 +28,9 @@ def gaze():
     calibrate = data.get('calibrate', False)
     if not frame_data:
         return jsonify({'error': 'No frame provided'}), 400
+    
+    if calibrate:
+        session['calibrated'] = True
 
     # Decode base64 image
     try:
@@ -149,6 +153,8 @@ def calibration():
 # Main app page (only accessible after calibration)
 @app.route('/learn')
 def learn():
+    if not session.get('calibrated'):
+        return redirect(url_for('calibration'))
     return render_template('index.html')
 
 def generate_response(prompt):
