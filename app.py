@@ -10,7 +10,6 @@ import tempfile
 import uuid
 from dotenv import load_dotenv
 from PIL import Image
-import matplotlib.pyplot as plt
 import io
 
 # Load environment variables
@@ -175,24 +174,7 @@ def generate_response(prompt):
         return None
 
 
-def render_latex_to_file(latex):
-    # Renders LaTeX string to a PNG file and returns the file path
-    try:
-        fig = plt.figure(figsize=(12, 4))  # Wider figure for equations
-        fig.text(0.5, 0.5, f"${latex}$", fontsize=36, horizontalalignment='center', verticalalignment='center')
-        buf = io.BytesIO()
-        fig.patch.set_alpha(0)
-        plt.axis('off')
-        fig.savefig(buf, format='png', dpi=300, bbox_inches='tight', pad_inches=0.2, transparent=True)
-        plt.close(fig)
-        buf.seek(0)
-        filename = os.path.join(tempfile.gettempdir(), f"latex_{uuid.uuid4()}.png")
-        with open(filename, 'wb') as f:
-            f.write(buf.read())
-        return filename
-    except Exception as e:
-        print('Failed to render LaTeX:', e)
-        return None
+# LaTeX rendering removed — server-side rendering endpoints disabled
 
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
@@ -256,35 +238,7 @@ def greeting():
         return jsonify({'success': False}), 500
 
 
-@app.route('/render_latex', methods=['POST'])
-def render_latex():
-    data = request.json or {}
-    latex = data.get('latex', '')
-    if not latex:
-        return jsonify({'error': 'No LaTeX provided'}), 400
-
-    # Render LaTeX to PNG using matplotlib
-    try:
-        fig = plt.figure()
-        fig.text(0, 0.9, f"${latex}$", fontsize=20)
-        buf = io.BytesIO()
-        fig.patch.set_alpha(0)
-        plt.axis('off')
-        fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', pad_inches=0.1, transparent=True)
-        plt.close(fig)
-        buf.seek(0)
-        filename = os.path.join(tempfile.gettempdir(), f"latex_{uuid.uuid4()}.png")
-        with open(filename, 'wb') as f:
-            f.write(buf.read())
-        return jsonify({'url': f'/latex/{os.path.basename(filename)}'})
-    except Exception as e:
-        print('Failed to render LaTeX:', e)
-        return jsonify({'error': 'Render failed'}), 500
-
-
-@app.route('/latex/<filename>')
-def serve_latex(filename):
-    return send_file(os.path.join(tempfile.gettempdir(), filename))
+# /render_latex endpoint removed. Static LaTeX serving disabled.
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):
