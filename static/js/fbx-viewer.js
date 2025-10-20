@@ -167,7 +167,7 @@ class FBXViewer {
     }
 
     _onModelLoaded(object){
-        object.position.set(-30,0,-50);
+        object.position.set(-35,0,-50);
         object.scale.set(55,55,55);
         object.traverse((child)=>{
             if (!child.isMesh) return;

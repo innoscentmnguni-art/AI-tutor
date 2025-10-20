@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}Gaze Calibration - AI Tutor{% endblock %}
+
+{% block head %}
+<style>
+    .calibration-target {
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background-color: red;
+        border-radius: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        left: 60%;
+    }
+    @media (max-width: 768px) {
+        .calibration-target {
+            left: 50%;
+        }
+    }
+    .ready-button {
+        display: none;
+        position: absolute;
+        bottom: 20%;
+        left: 50%;
+        transform: translateX(-50%);
+        transition: opacity 0.3s ease-in-out;
+    }
+    #startCalibrationButton {
+        transition: opacity 0.3s ease-in-out;
+    }
+    .calibration-text {
+        transition: opacity 0.3s ease-in-out;
+    }
+    .calibration-text {
+        position: absolute;
+        top: 20%;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+    }
+    #videoElement {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="container-fluid">
+    <div class="calibration-text">
+        <h2>Gaze Calibration</h2>
+        <p id="calibrationInstructions">Position yourself comfortably and click "Start Calibration" when ready.</p>
+    </div>
+    
+    <div class="calibration-target" id="calibrationTarget"></div>
+    
+    <button id="startCalibrationButton" class="btn btn-primary" style="position: absolute; bottom: 40%; left: 50%; transform: translateX(-50%);">
+        Start Calibration
+    </button>
+
+    <button id="readyButton" class="btn btn-success ready-button">
+        Ready to Start Learning
+    </button>
+
+    <video id="videoElement" autoplay style="display: none;"></video>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/gaze-client.js') }}"></script>
+<script>
+class CalibrationManager {
+    constructor() {
+        this.video = document.getElementById('videoElement');
+        this.startButton = document.getElementById('startCalibrationButton');
+        this.readyButton = document.getElementById('readyButton');
+        this.instructions = document.getElementById('calibrationInstructions');
+        this.calibrationInterval = null;
+        this.videoReady = false;
+
+        this.startButton.disabled = true;
+        this.initializeVideo();
+        this.bindEvents();
+    }
+
+    initializeVideo() {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    this.video.srcObject = stream;
+                    this.video.onloadedmetadata = () => {
+                        // Wait until videoWidth and videoHeight are nonzero
+                        const checkReady = () => {
+                            if (this.video.videoWidth > 0 && this.video.videoHeight > 0) {
+                                this.videoReady = true;
+                                this.startButton.disabled = false;
+                                this.instructions.textContent = 'Position yourself comfortably and click "Start Calibration" when ready.';
+                            } else {
+                                setTimeout(checkReady, 100);
+                            }
+                        };
+                        checkReady();
+                    };
+                })
+                .catch(err => {
+                    console.error("Error accessing webcam:", err);
+                    this.instructions.textContent = "Error: Unable to access webcam. Please ensure camera permissions are granted.";
+                    this.startButton.disabled = true;
+                });
+        } else {
+            this.instructions.textContent = "Error: Webcam not supported on this device.";
+            this.startButton.disabled = true;
+        }
+    }
+
+    bindEvents() {
+        this.startButton.addEventListener('click', () => {
+            if (this.videoReady) {
+                this.startCalibration();
+            } else {
+                this.instructions.textContent = "Webcam not ready. Please wait...";
+            }
+        });
+        this.readyButton.addEventListener('click', () => {
+            window.location.href = '/learn';
+        });
+    }
+
+    async startCalibration() {
+        this.startButton.style.display = 'none';
+        this.instructions.textContent = 'Position yourself comfortably and stare at the red dot...';
+        
+        // Wait 2 seconds before starting calibration
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Initial calibration phase - 3 seconds
+        this.instructions.textContent = 'Calibrating... Keep staring at the red dot';
+        let calibrationSuccess = await this.runCalibrationPhase(3000);
+        
+        if (!calibrationSuccess) {
+            this.instructions.textContent = 'Calibration failed. Please try again.';
+            this.startButton.style.display = 'block';
+            return;
+        }
+        
+        // Verification phase - 2 seconds
+        this.instructions.textContent = 'Verifying calibration... Keep staring at the dot';
+        let verificationSuccess = await this.verifyCalibration(2000);
+        
+        if (!verificationSuccess) {
+            this.instructions.textContent = 'Calibration verification failed. Please try again.';
+            this.startButton.style.display = 'block';
+            return;
+        }
+        
+        // Success
+        this.instructions.textContent = 'Calibration successful! You can now proceed to start learning.';
+        this.readyButton.style.display = 'block';
+    }
+
+    async runCalibrationPhase(duration) {
+        return new Promise((resolve) => {
+            let successfulFrames = 0;
+            let totalFrames = 0;
+            const requiredSuccessRate = 0.8; // 80% success rate required
+            
+            const interval = setInterval(async () => {
+                try {
+                    const response = await this.captureAndSendFrame(true);
+                    if (response && response.gaze_angle !== undefined) {
+                        successfulFrames++;
+                    }
+                    totalFrames++;
+                } catch (error) {
+                    console.error('Calibration error:', error);
+                }
+            }, 100);
+
+            setTimeout(() => {
+                clearInterval(interval);
+                const successRate = successfulFrames / totalFrames;
+                resolve(successRate >= requiredSuccessRate);
+            }, duration);
+        });
+    }
+
+    async verifyCalibration(duration) {
+        return new Promise((resolve) => {
+            let inRangeFrames = 0;
+            let totalFrames = 0;
+            const requiredAccuracy = 0.7; // 70% of frames must show good gaze angle
+            
+            const interval = setInterval(async () => {
+                try {
+                    const response = await this.captureAndSendFrame(false);
+                    if (response && response.gaze_angle !== undefined) {
+                        // Consider angles less than 15 degrees as "good"
+                        if (response.gaze_angle < 15) {
+                            inRangeFrames++;
+                        }
+                        totalFrames++;
+                    }
+                } catch (error) {
+                    console.error('Verification error:', error);
+                }
+            }, 100);
+
+            setTimeout(() => {
+                clearInterval(interval);
+                const accuracy = inRangeFrames / totalFrames;
+                resolve(accuracy >= requiredAccuracy);
+            }, duration);
+        });
+    }
+
+    async captureAndSendFrame(calibrate = false) {
+        return new Promise((resolve, reject) => {
+            if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
+                this.instructions.textContent = "Error: Webcam frame not available. Please reload and allow camera access.";
+                reject('Video dimensions are zero');
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = this.video.videoWidth;
+            canvas.height = this.video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(this.video, 0, 0);
+            canvas.toBlob(blob => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64data = reader.result.split(',')[1];
+                    fetch('/gaze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            frame: base64data,
+                            calibrate: calibrate
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => resolve(data))
+                    .catch(error => reject(error));
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg');
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const calibrationManager = new CalibrationManager();
+});
+</script>
+{% endblock %}
