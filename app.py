@@ -122,8 +122,15 @@ def text_to_speech(text):
         print(f"Error synthesizing audio: {result.reason}")
         return None, None
 
+
+# Serve home page at root
 @app.route('/')
 def home():
+    return render_template('home.html')
+
+# Main app page (previously at '/')
+@app.route('/learn')
+def learn():
     return render_template('index.html')
 
 def generate_response(prompt):

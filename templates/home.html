@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Home - Nova AI Tutor{% endblock %}
+{% block head %}
+<style>
+    .welcome-hero {
+        transition: transform 1.6s cubic-bezier(.77,0,.18,1), opacity 1.6s;
+        will-change: transform, opacity;
+        opacity: 1;
+        transform: translateY(0);
+    }
+    /* .welcome-hero.moved will be set dynamically by JS */
+    .start-btn {
+        opacity: 0;
+        transition: opacity 0.8s;
+        margin-top: 32px;
+        font-size: 1.3rem;
+        padding: 0.75em 2em;
+        border-radius: 2em;
+        box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+        font-weight: 600;
+        background: linear-gradient(90deg,#4f8cff 0%,#6ed6ff 100%);
+        color: #fff;
+        border: none;
+        letter-spacing: 0.03em;
+    }
+    .start-btn.visible {
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+{% block body %}
+<div class="container py-5 d-flex flex-column align-items-center justify-content-center" style="min-height: 80vh;">
+    <div id="welcomeHero" class="welcome-hero d-flex flex-column align-items-center">
+        <img src="{{ url_for('static', filename='img/image.png') }}" alt="Nova AI Tutor" class="mb-4" style="max-width: 220px; height: auto;">
+        <h1 class="display-5 fw-bold text-center">Welcome to Nova the digital AI Tutor</h1>
+    </div>
+    <button id="startBtn" class="start-btn">Start Learning</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    window.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            var hero = document.getElementById('welcomeHero');
+            var startBtn = document.getElementById('startBtn');
+            // Calculate 80% of current distance to top
+            var rect = hero.getBoundingClientRect();
+            var currentY = rect.top;
+            var moveY = currentY * 0.8;
+            // Animate at half the current speed (double the duration)
+            hero.style.transition = 'transform 1.6s cubic-bezier(.77,0,.18,1), opacity 1.6s';
+            hero.style.transform = 'translateY(-' + moveY + 'px)';
+            startBtn.classList.add('visible');
+        }, 1500);
+        document.getElementById('startBtn').addEventListener('click', function() {
+            window.location.href = '/learn';
+        });
+    });
+</script>
+{% endblock %}
