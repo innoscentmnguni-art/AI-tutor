@@ -330,7 +330,7 @@ class FBXViewer {
     }
 
     _createSampleBoard(object){
-        try{
+            try{
             const initialText = 'Welcome\nMy name is Nova\nwhat would you like to learn today';
             const boardWidth = 130; const boardHeight = 65;
             const sampleTex = this._createTextTexture(initialText, 2048, 1024);

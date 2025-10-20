@@ -232,9 +232,18 @@ def synthesize():
 
 @app.route('/greeting')
 def greeting():
-    # Predefined greeting that the avatar will lip-sync on start
-    greet_spoken = "Hello. My name is Nova, your digital AI tutor. What would you like to learn today?"
-    board_text = "Welcome\nMy name is Nova\nwhat would you like to learn today"
+    # Updated greeting: explain scrollable board
+    greet_spoken = (
+        "Hello! My name is Nova, your digital AI tutor. Next to me is a scrollable board. "
+        "This board will be used for notes and equations as we learn together. "
+        "If the content is too large to fit, you can hover your mouse over the board and scroll to see everything. "
+        "What would you like to learn today?"
+    )
+    board_text = (
+        "Welcome to your AI tutor\n"
+        "Note: Sometimes the entire content won't fit, so hover your mouse over the board and scroll to see more.\n"
+        "We apologise for the inconvenience. Automatic scrolling is coming soon!"
+    )
     audio_file, visemes = text_to_speech(greet_spoken)
     if audio_file:
         return jsonify({
