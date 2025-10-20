@@ -141,7 +141,12 @@ def text_to_speech(text):
 def home():
     return render_template('home.html')
 
-# Main app page (previously at '/')
+# Calibration page
+@app.route('/calibration')
+def calibration():
+    return render_template('calibration.html')
+
+# Main app page (only accessible after calibration)
 @app.route('/learn')
 def learn():
     return render_template('index.html')

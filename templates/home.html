@@ -40,20 +40,19 @@
 {% block scripts %}
 <script>
     window.addEventListener('DOMContentLoaded', function() {
+        const startBtn = document.getElementById('startBtn');
+        const hero = document.getElementById('welcomeHero');
+
+        // Animate welcome hero sliding up
         setTimeout(function() {
-            var hero = document.getElementById('welcomeHero');
-            var startBtn = document.getElementById('startBtn');
-            // Calculate 80% of current distance to top
-            var rect = hero.getBoundingClientRect();
-            var currentY = rect.top;
-            var moveY = currentY * 0.8;
-            // Animate at half the current speed (double the duration)
-            hero.style.transition = 'transform 1.6s cubic-bezier(.77,0,.18,1), opacity 1.6s';
-            hero.style.transform = 'translateY(-' + moveY + 'px)';
+            const rect = hero.getBoundingClientRect();
+            const moveY = rect.top * 0.8;
+            hero.style.transform = `translateY(-${moveY}px)`;
             startBtn.classList.add('visible');
-        }, 1500);
-        document.getElementById('startBtn').addEventListener('click', function() {
-            window.location.href = '/learn';
+        }, 800);
+
+        startBtn.addEventListener('click', function() {
+            window.location.href = '/calibration';
         });
     });
 </script>
