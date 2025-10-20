@@ -130,8 +130,9 @@ class WavEncoder {
 }
 
 class SpeechRecognitionManager {
-    constructor(onComplete) {
+    constructor(onComplete, onLevel) {
         this.onComplete = onComplete; // callback(transcript)
+        this.onLevel = onLevel; // callback(level 0..1)
         this._resetState();
     }
 
@@ -147,27 +148,59 @@ class SpeechRecognitionManager {
     }
 
     async start() {
+        // allow caller to request keepAlive by passing parameter to start
         if (!navigator.mediaDevices?.getUserMedia) { console.warn('getUserMedia not supported'); return false; }
         try {
-            this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // reuse existing stream if present
+            if (!this.stream) this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
             console.warn('Microphone access denied', e);
             return false;
         }
 
-        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream);
-        this.recorderNode = this.audioCtx.createScriptProcessor(4096, 1, 1);
-        this.recorderNode.onaudioprocess = this._onAudio.bind(this);
-        this.sourceNode.connect(this.recorderNode);
-        this.recorderNode.connect(this.audioCtx.destination);
+        // create audio context if not present
+        if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!this.sourceNode) this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream);
+
+        // create recorder node if not present
+        if (!this.recorderNode) {
+            this.recorderNode = this.audioCtx.createScriptProcessor(4096, 1, 1);
+            this.recorderNode.onaudioprocess = this._onAudio.bind(this);
+            this.sourceNode.connect(this.recorderNode);
+            this.recorderNode.connect(this.audioCtx.destination);
+        }
         return true;
+    }
+
+    _pauseRecording() {
+        try {
+            if (this.recorderNode) {
+                try { this.recorderNode.disconnect(); } catch(e){}
+                this.recorderNode.onaudioprocess = null;
+                this.recorderNode = null;
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    _resumeRecording() {
+        try {
+            if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (!this.sourceNode && this.stream) this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream);
+            if (!this.recorderNode) {
+                this.recorderNode = this.audioCtx.createScriptProcessor(4096, 1, 1);
+                this.recorderNode.onaudioprocess = this._onAudio.bind(this);
+                try { this.sourceNode.connect(this.recorderNode); } catch(e){}
+                try { this.recorderNode.connect(this.audioCtx.destination); } catch(e){}
+            }
+        } catch (e) { console.error('Failed to resume recording', e); }
     }
 
     _onAudio(e) {
         const input = e.inputBuffer.getChannelData(0);
         this.buffer.push(new Float32Array(input));
         const rms = Math.sqrt(input.reduce((s, v) => s + v * v, 0) / input.length);
+        // emit level callback for UI visualization (clamped 0..1)
+        try { if (this.onLevel) this.onLevel(Math.min(1, rms * 10)); } catch(e){}
         if (rms > this.threshold) {
             this.silenceStart = null;
         } else if (!this.silenceStart) {
@@ -188,6 +221,7 @@ class SpeechRecognitionManager {
         try { if (this.sourceNode) this.sourceNode.disconnect(); } catch(e){}
         try { if (this.audioCtx) this.audioCtx.close(); } catch(e){}
         try { if (this.stream) this.stream.getTracks().forEach(t => t.stop()); } catch(e){}
+        try { if (this.onLevel) this.onLevel(0); } catch(e){}
     }
 
     async finalize() {
@@ -195,7 +229,8 @@ class SpeechRecognitionManager {
         const merged = WavEncoder.merge(this.buffer);
         const rate = (this.audioCtx && this.audioCtx.sampleRate) ? this.audioCtx.sampleRate : 48000;
         const wav = WavEncoder.encode(merged, rate);
-        this._cleanup();
+        // pause recording so we stop processing until transcription returns
+        this._pauseRecording();
         this.buffer = [];
         try {
             await this._sendForTranscription(wav);
@@ -210,8 +245,13 @@ class SpeechRecognitionManager {
             if (!res.ok) { console.error('Transcription failed', res.status); return; }
             const data = await res.json();
             if (data?.transcript) this.onComplete(data.transcript);
+            // If the mic should remain on, resume recording after a short delay
+            if (this._keepAlive) {
+                setTimeout(() => { try { this._resumeRecording(); } catch(e){} }, 200);
+            }
         } catch (e) { console.error('Error sending audio for transcription:', e); }
     }
+
 }
 
 class UIManager {
@@ -219,6 +259,8 @@ class UIManager {
         this.sendBtn = sendBtn;
         this.micBtn = micBtn;
         this._savedSendIcon = null;
+        this._levelEl = null;
+        this._ensureLevelElement();
     }
 
     setSendLoading(loading) {
@@ -241,6 +283,46 @@ class UIManager {
         // SVG swap
         this.micBtn.innerHTML = active ? `\n<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-mic-fill" viewBox="0 0 16 16">\n  <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0z"/>\n  <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5"/>\n</svg>` : `\n<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-mic-mute-fill" viewBox="0 0 16 16">\n  <path d="M13 8c0 .564-.094 1.107-.266 1.613l-.814-.814A4 4 0 0 0 12 8V7a.5.5 0 0 1 1 0zm-5 4c.818 0 1.578-.245 2.212-.667l.718.719a5 5 0 0 1-2.43.923V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 1 0v1a4 4 0 0 0 4 4m3-9v4.879L5.158 2.037A3.001 3.001 0 0 1 11 3"/>\n  <path d="M9.486 10.607 5 6.12V8a3 3 0 0 0 4.486 2.607m-7.84-9.253 12 12 .708-.708-12-12z"/>\n</svg>`;
     }
+
+    _ensureLevelElement() {
+        if (!this.micBtn) return;
+        // create a small level bar container inside the mic button if not present
+        if (!this._levelEl) {
+            this._levelEl = document.createElement('div');
+            this._levelEl.style.position = 'absolute';
+            this._levelEl.style.bottom = '2px';
+            this._levelEl.style.left = '50%';
+            this._levelEl.style.transform = 'translateX(-50%)';
+            this._levelEl.style.width = '24px';
+            this._levelEl.style.height = '4px';
+            this._levelEl.style.borderRadius = '2px';
+            this._levelEl.style.background = 'rgba(255,255,255,0.15)';
+            this._levelEl.style.overflow = 'hidden';
+            this._levelEl.style.pointerEvents = 'none';
+            const inner = document.createElement('div');
+            inner.style.height = '100%';
+            inner.style.width = '0%';
+            inner.style.background = 'limegreen';
+            inner.style.transition = 'width 80ms linear';
+            this._levelEl._inner = inner;
+            this._levelEl.appendChild(inner);
+            this.micBtn.style.position = 'relative';
+            this.micBtn.appendChild(this._levelEl);
+        }
+    }
+
+    updateMicLevel(norm) {
+        this._ensureLevelElement();
+        if (!this._levelEl) return;
+        const pct = Math.round(Math.max(0, Math.min(1, norm)) * 100);
+        this._levelEl._inner.style.width = pct + '%';
+        // change color based on level
+        if (pct > 66) this._levelEl._inner.style.background = '#ff5c33';
+        else if (pct > 33) this._levelEl._inner.style.background = '#ffd633';
+        else this._levelEl._inner.style.background = 'limegreen';
+    }
+
+    resetMicLevel() { if (this._levelEl) this._levelEl._inner.style.width = '0%'; }
 }
 
 class TTSManager {
@@ -249,7 +331,9 @@ class TTSManager {
         this.sendBtn = sendBtn;
         this.micBtn = micBtn;
         this.ui = new UIManager(sendBtn, micBtn);
-        this.sr = new SpeechRecognitionManager(this._onTranscript.bind(this));
+        // Ensure mic starts OFF by default
+        if (this.micBtn) this.micBtn.setAttribute('aria-pressed', 'false');
+        this.sr = new SpeechRecognitionManager(this._onTranscript.bind(this), (lvl) => this.ui.updateMicLevel(lvl));
         this._busy = false;
         this._bind();
     }
@@ -299,7 +383,12 @@ class TTSManager {
             if (data.board_text && window.updateSampleText) {
                 try { window.updateSampleText(data.board_text); } catch(e) { console.error(e); }
             }
+            // pause recording while avatar speaks to avoid capturing playback
+            try { if (this.sr) { this.sr._pauseRecording(); this.ui.resetMicLevel(); } } catch(e){}
             await AudioManager.playWithVisemes(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap);
+            // resume recording if mic still toggled on and keepAlive requested
+            const micStillOn = this.micBtn?.getAttribute('aria-pressed') === 'true';
+            try { if (micStillOn && this.sr && this.sr._keepAlive) this.sr._resumeRecording(); } catch(e){}
         } else {
             console.error('Failed to synthesize speech:', data?.error);
         }
@@ -312,9 +401,18 @@ class TTSManager {
         if (next) {
             // If busy, do not start recognition; keep UI active but don't record
             if (this._busy) { return; }
-            await this.sr.start();
+            // indicate SR should keep recording active across transcribe cycles
+            this.sr._keepAlive = true;
+            const started = await this.sr.start();
+            if (!started) {
+                // failed to start (permission denied) => reset UI
+                this.ui.setMicActive(false);
+            }
         } else {
+            // stop keepAlive and fully stop recognition
+            this.sr._keepAlive = false;
             this.sr.stop();
+            this.ui.resetMicLevel();
         }
     }
 
