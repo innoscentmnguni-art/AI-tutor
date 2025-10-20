@@ -7,6 +7,12 @@ class GazeClient {
         this.statusEl = document.getElementById(statusId);
         this.container = document.getElementById(containerId);
 
+        // Early return if required elements are not found
+        if (!this.video || !this.processedImg || !this.statusEl || !this.container) {
+            console.warn('GazeClient: Required elements not found');
+            return;
+        }
+
         this.streaming = false;
         this.trackingEnabled = false; // start off
         this.calibrateNext = false;
@@ -25,25 +31,17 @@ class GazeClient {
         // Use Bootstrap utility classes for horizontal layout and spacing
         this.controlsWrap.className = 'd-flex gap-2 mt-2';
 
-        // Calibrate button
-        this.calibrateBtn = document.createElement('button');
-        this.calibrateBtn.textContent = 'Calibrate';
-        this.calibrateBtn.className = 'btn btn-warning';
-        this.calibrateBtn.disabled = true;
-
-        // Toggle button
+        // Toggle button only (no calibrate button since calibration happens on a separate page)
         this.toggleBtn = document.createElement('button');
         this.toggleBtn.textContent = 'Turn On';
         this.toggleBtn.className = 'btn btn-secondary';
 
-        // Append buttons to the wrapper, then wrapper to container
-        this.controlsWrap.appendChild(this.calibrateBtn);
+        // Append toggle button to the wrapper, then wrapper to container
         this.controlsWrap.appendChild(this.toggleBtn);
         this.container.appendChild(this.controlsWrap);
     }
 
     _bindEvents(){
-        this.calibrateBtn.addEventListener('click', () => this._onCalibrateClick());
         this.toggleBtn.addEventListener('click', () => this._onToggleClick());
         window.addEventListener('unload', () => this.stop());
     }
@@ -84,7 +82,6 @@ class GazeClient {
 
     setTrackingEnabled(enable){
         this.trackingEnabled = enable;
-        this.calibrateBtn.disabled = !enable;
         this.toggleBtn.textContent = enable ? 'Turn Off' : 'Turn On';
         if (enable && !this._rafHandle){
             this._rafHandle = requestAnimationFrame(()=> this._pollLoop());
@@ -193,11 +190,15 @@ class GazeClient {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Create client instance and keep reference globally for debugging
-    window.gazeClient = new GazeClient({
-        videoId: 'webcam',
-        processedImgId: 'processed-frame',
-        statusId: 'engagement-status',
-        containerId: 'engagement-visuals'
-    });
+    // Only initialize if we're on a page that needs gaze tracking
+    const container = document.getElementById('engagement-visuals');
+    if (container) {
+        // Create client instance and keep reference globally for debugging
+        window.gazeClient = new GazeClient({
+            videoId: 'webcam',
+            processedImgId: 'processed-frame',
+            statusId: 'engagement-status',
+            containerId: 'engagement-visuals'
+        });
+    }
 });
