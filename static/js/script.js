@@ -46,6 +46,11 @@ class AppController {
         this.isPlaying = false;
         // Tracks whether AI request or avatar playback is in progress.
         this._promptInProgress = false;
+        // Speech recognition (STT) state
+        this.recognition = null;
+        this._sttListening = false; // whether recognition is actively listening
+        this._sttTranscript = '';
+        this._silenceTimer = null; // 1s silence timer to finalize transcript
     }
 
     init(){
@@ -148,11 +153,220 @@ class AppController {
             this.ttsMicButton.innerHTML = `\n                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-mic-fill" viewBox="0 0 16 16">\n                              <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0z"/>\n                              <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5"/>\n                            </svg>`;
             this.ttsMicButton.classList.remove('btn-outline-light');
             this.ttsMicButton.classList.add('btn-outline-success');
+            // Start speech recognition when user turns mic ON
+            this._startSTT();
         } else {
             // mic off (muted)
             this.ttsMicButton.innerHTML = `\n                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-mic-mute-fill" viewBox="0 0 16 16">\n                              <path d="M13 8c0 .564-.094 1.107-.266 1.613l-.814-.814A4 4 0 0 0 12 8V7a.5.5 0 0 1 1 0zm-5 4c.818 0 1.578-.245 2.212-.667l.718.719a5 5 0 0 1-2.43.923V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 1 0v1a4 4 0 0 0 4 4m3-9v4.879L5.158 2.037A3.001 3.001 0 0 1 11 3"/>\n                              <path d="M9.486 10.607 5 6.12V8a3 3 0 0 0 4.486 2.607m-7.84-9.253 12 12 .708-.708-12-12z"/>\n                            </svg>`;
             this.ttsMicButton.classList.remove('btn-outline-success');
             this.ttsMicButton.classList.add('btn-outline-light');
+            // Stop speech recognition when user turns mic OFF
+            this._stopSTT();
+        }
+    }
+
+    // --- Speech-to-text (STT) using Azure via server-side transcription ---
+    // Records raw PCM in browser using AudioContext, builds WAV, POSTs to /transcribe
+    async _startSTT(){
+        // If avatar/AI busy, don't start recording yet; keep UI as ON
+        if (this._promptInProgress) {
+            this._sttListening = false;
+            return;
+        }
+        // Ensure we have microphone access and set up audio pipeline
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            console.warn('getUserMedia not supported');
+            return;
+        }
+        try {
+            this._sttStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+            console.warn('Microphone access denied', e);
+            return;
+        }
+
+        // Prepare AudioContext and recorder nodes
+        this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        this._sampleRate = this._audioCtx.sampleRate || 48000;
+        this._sourceNode = this._audioCtx.createMediaStreamSource(this._sttStream);
+
+        // ScriptProcessor for collecting raw audio and detecting silence
+        const bufferSize = 4096;
+        this._recorderNode = this._audioCtx.createScriptProcessor(bufferSize, 1, 1);
+        this._audioBuffer = []; // Float32Array chunks
+        this._silenceStart = null;
+        this._silenceThreshold = 0.01; // RMS threshold for silence detection
+        this._silenceTimeoutMs = 1000; // 1 second of silence
+
+        this._recorderNode.onaudioprocess = (e) => {
+            const input = e.inputBuffer.getChannelData(0);
+            // Store audio
+            this._audioBuffer.push(new Float32Array(input));
+            // Compute RMS for silence detection
+            let sum = 0;
+            for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+            const rms = Math.sqrt(sum / input.length);
+            if (rms > this._silenceThreshold) {
+                this._silenceStart = null;
+            } else {
+                if (!this._silenceStart) this._silenceStart = Date.now();
+                else {
+                    const silentMs = Date.now() - this._silenceStart;
+                    if (silentMs >= this._silenceTimeoutMs) {
+                        // Enough silence - finalize recording
+                        this._finalizeRecording();
+                    }
+                }
+            }
+        };
+
+        // Connect nodes
+        this._sourceNode.connect(this._recorderNode);
+        this._recorderNode.connect(this._audioCtx.destination);
+        this._sttListening = true;
+    }
+
+    _stopSTT(){
+        // Stop recording immediately and finalize if we have data
+        if (this._silenceTimer) { clearTimeout(this._silenceTimer); this._silenceTimer = null; }
+        this._sttListening = false;
+        try {
+            if (this._recorderNode) {
+                this._recorderNode.disconnect();
+                this._recorderNode.onaudioprocess = null;
+                this._recorderNode = null;
+            }
+            if (this._sourceNode) {
+                this._sourceNode.disconnect();
+                this._sourceNode = null;
+            }
+            if (this._audioCtx) {
+                try { this._audioCtx.close(); } catch(e){}
+                this._audioCtx = null;
+            }
+            if (this._sttStream) {
+                this._sttStream.getTracks().forEach(t => t.stop());
+                this._sttStream = null;
+            }
+        } finally {
+            if (this._audioBuffer && this._audioBuffer.length > 0) {
+                this._finalizeRecording();
+            }
+            this._audioBuffer = [];
+        }
+    }
+
+    async _finalizeRecording(){
+        // Prevent double-finalize
+        if (!this._audioBuffer || this._audioBuffer.length === 0) return;
+        // Mark as not listening so recorder doesn't trigger again
+        this._sttListening = false;
+        // Disconnect nodes but keep stream stopping for UI control
+        try {
+            if (this._recorderNode) { this._recorderNode.disconnect(); this._recorderNode.onaudioprocess = null; }
+            if (this._sourceNode) { this._sourceNode.disconnect(); }
+        } catch(e){}
+
+        // Merge Float32 chunks and convert to WAV
+        const flat = this._mergeBuffers(this._audioBuffer);
+        this._audioBuffer = [];
+        const wavBlob = this._encodeWAV(flat, this._sampleRate);
+
+        // Stop tracks and audio context
+        try {
+            if (this._sttStream) { this._sttStream.getTracks().forEach(t => t.stop()); this._sttStream = null; }
+            if (this._audioCtx) { try { this._audioCtx.close(); } catch(e){} this._audioCtx = null; }
+        } catch(e){}
+
+        // Send to server for Azure transcription
+        try {
+            await this._sendAudioForTranscription(wavBlob);
+        } catch (e) {
+            console.error('Failed to transcribe audio', e);
+        }
+    }
+
+    _mergeBuffers(buffers){
+        let total = 0;
+        for (let i = 0; i < buffers.length; i++) total += buffers[i].length;
+        const result = new Float32Array(total);
+        let offset = 0;
+        for (let i = 0; i < buffers.length; i++) {
+            result.set(buffers[i], offset);
+            offset += buffers[i].length;
+        }
+        return result;
+    }
+
+    _encodeWAV(samples, sampleRate){
+        function writeString(dataview, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                dataview.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+
+        // RIFF chunk descriptor
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + samples.length * 2, true);
+        writeString(view, 8, 'WAVE');
+        // fmt sub-chunk
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); // PCM format
+        view.setUint16(22, 1, true); // Mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true); // byte rate
+        view.setUint16(32, 2, true); // block align
+        view.setUint16(34, 16, true); // bits per sample
+        // data sub-chunk
+        writeString(view, 36, 'data');
+        view.setUint32(40, samples.length * 2, true);
+
+        // Write samples
+        let offset = 44;
+        for (let i = 0; i < samples.length; i++) {
+            const s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            offset += 2;
+        }
+
+        return new Blob([view], { type: 'audio/wav' });
+    }
+
+    async _sendAudioForTranscription(wavBlob){
+        const fd = new FormData();
+        fd.append('file', wavBlob, 'speech.wav');
+        try {
+            const res = await fetch('/transcribe', { method: 'POST', body: fd });
+            if (!res.ok) {
+                console.error('Transcription failed:', res.status);
+                return;
+            }
+            const data = await res.json();
+            if (data && data.transcript) {
+                // Place transcript into input and send via TTS flow
+                if (this.ttsInput) {
+                    this.ttsInput.value = data.transcript;
+                    await this._onTtsClick();
+                }
+            }
+        } catch (e) {
+            console.error('Error sending audio for transcription:', e);
+        } finally {
+            // After AI response finishes (avatar playback), if mic toggle still ON, resume listening
+            if (this.ttsMicButton && this.ttsMicButton.getAttribute('aria-pressed') === 'true'){
+                const checkAndStart = () => {
+                    if (!this._promptInProgress) {
+                        this._startSTT();
+                    } else {
+                        setTimeout(checkAndStart, 200);
+                    }
+                };
+                setTimeout(checkAndStart, 200);
+            }
         }
     }
 

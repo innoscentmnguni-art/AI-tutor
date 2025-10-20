@@ -250,5 +250,53 @@ def serve_latex(filename):
 def serve_audio(filename):
     return send_file(os.path.join(tempfile.gettempdir(), filename))
 
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    # Accept uploaded WAV file and transcribe using Azure Speech SDK
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    f = request.files['file']
+    if f.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+
+    tmp_filename = os.path.join(tempfile.gettempdir(), f"stt_{uuid.uuid4()}.wav")
+    try:
+        # Save uploaded file
+        f.save(tmp_filename)
+
+        # Configure Azure Speech SDK (using same key/region as TTS)
+        speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
+        # Use same language as TTS voice (en-ZA)
+        speech_config.speech_recognition_language = 'en-ZA'
+
+        audio_input = speechsdk.audio.AudioConfig(filename=tmp_filename)
+        recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_input)
+
+        # Recognize once is good for short uploads (1-2 sentences). For longer audio,
+        # we could use continuous recognition with event handlers.
+        result = recognizer.recognize_once_async().get()
+
+        transcript_text = ''
+        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+            transcript_text = result.text
+        else:
+            print("Transcription failed:", result.reason)
+            if result.reason == speechsdk.ResultReason.Canceled:
+                details = speechsdk.CancellationDetails(result)
+                print("Cancellation reason:", details.reason)
+                print("Error details:", details.error_details)
+
+        return jsonify({'transcript': transcript_text})
+    except Exception as e:
+        print("Transcription error:", e)
+        return jsonify({'error': 'Transcription failed', 'details': str(e)}), 500
+    finally:
+        try:
+            if os.path.exists(tmp_filename):
+                os.remove(tmp_filename)
+        except Exception:
+            pass
+
 if __name__ == '__main__':
     app.run(debug=True)
