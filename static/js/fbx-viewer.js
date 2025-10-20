@@ -19,8 +19,18 @@ class FBXViewer {
         this.mixer = null;
         this.idleAction = null;
         this.fbxLoader = new FBXLoader();
+        // gaze/engagement state used to drive apple behavior
+        this._gazeEngaged = true;
+        this._gazeTimer = null; // timer id for not-engaged -> show apple
+        this._gazeNotEngagedSince = null;
+        this._appleFadeTween = null; // used to track fade transitions
         this._loadAssets();
         this._bindEvents();
+        // listen for gaze events if available
+        try {
+            window.addEventListener('gaze-engagement', (ev) => this._onGazeEngagement(ev.detail && ev.detail.engaged));
+            window.addEventListener('gaze-tracking', (ev) => this._onGazeTracking(ev.detail && ev.detail.enabled));
+        } catch (e) { /* ignore */ }
         this._animate();
     }
 
@@ -200,7 +210,7 @@ class FBXViewer {
         tex.encoding = THREE.sRGBEncoding;
         tex.needsUpdate = true;
 
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 1.0 });
         const sprite = new THREE.Sprite(mat);
         sprite.scale.set(12,12,1); // adjust to roughly head size; tuned for model scale
         sprite.name = 'appleSprite';
@@ -210,13 +220,96 @@ class FBXViewer {
         // store reference to avatar object for positioning; prefer AvatarHead or model root
         this.avatarObject = object;
         // initial hide until positioned
-        sprite.visible = false;
+    sprite.visible = false;
+    // ensure material opacity is 0 while hidden to support fades
+    try { sprite.material.opacity = 0; } catch(e) { /* ignore */ }
 
         // expose simple helpers for runtime tweaking from console
         try{
-            window.toggleAppleSprite = (v) => { if (!this.appleSprite) return; this.appleSprite.visible = typeof v === 'boolean' ? v : !this.appleSprite.visible; };
+            window.toggleAppleSprite = (v) => {
+                if (!this.appleSprite) return;
+                const show = typeof v === 'boolean' ? v : !this.appleSprite.visible;
+                this.appleSprite.visible = show;
+                try{ this.appleSprite.material.opacity = show ? 1.0 : 0.0; } catch(e) {}
+                console.log('toggleAppleSprite ->', show, this.appleSprite);
+            };
             window.setAppleSpriteScale = (s) => { if (!this.appleSprite) return; const val = typeof s === 'number' ? s : 18; this.appleSprite.scale.set(val, val, 1); };
         }catch(e){ /* ignore */ }
+    }
+
+    // Gaze event handlers
+    _onGazeTracking(enabled){
+        // if tracking is off, hide apple immediately and clear timers
+        if (!enabled){
+            // Cancel any running fade
+            if (this._appleFadeTween && this._appleFadeTween.cancel) try{ this._appleFadeTween.cancel(); }catch(e){}
+        }
+        console.log('_onGazeTracking', enabled);
+        if (!enabled){
+            this._clearGazeTimer();
+            if (this.appleSprite){
+                this.appleSprite.visible = false;
+                try{ this.appleSprite.material.opacity = 0; }catch(e){}
+            }
+            this._gazeEngaged = true; // treat as engaged so apple won't reappear
+        }
+    }
+
+    _onGazeEngagement(engaged){
+        console.log('_onGazeEngagement', engaged);
+        // engaged === true/false
+        this._gazeEngaged = !!engaged;
+        if (this._gazeEngaged){
+            // user re-engaged: fade apple out over 2s
+            this._clearGazeTimer();
+            this._fadeAppleOut(2000);
+        } else {
+            // user not engaged: start 3s timer (only if not already running), then show apple
+            if (!this._gazeTimer) {
+                this._gazeNotEngagedSince = Date.now();
+                console.log('Starting disengagement timer for apple appearance');
+                this._gazeTimer = setTimeout(()=>{
+                    console.log('Disengagement timer fired: showing apple');
+                    this._showAppleImmediate();
+                    this._gazeTimer = null;
+                }, 3000);
+            }
+        }
+    }
+
+    _clearGazeTimer(){ if (this._gazeTimer){ clearTimeout(this._gazeTimer); this._gazeTimer = null; } }
+
+    _showAppleImmediate(){
+        if (!this.appleSprite) return;
+        // Cancel any running fade
+        if (this._appleFadeTween && this._appleFadeTween.cancel) try{ this._appleFadeTween.cancel(); }catch(e){}
+        try{
+            this.appleSprite.visible = true;
+            this.appleSprite.material.opacity = 1.0;
+        } catch(e){}
+        console.log('_showAppleImmediate');
+    }
+
+    _fadeAppleOut(durationMs = 2000){
+        if (!this.appleSprite) return;
+        // cancel any running fade
+        if (this._appleFadeTween && this._appleFadeTween.cancel) try{ this._appleFadeTween.cancel(); }catch(e){}
+        const start = performance.now();
+        const startOpacity = (this.appleSprite.material && typeof this.appleSprite.material.opacity === 'number') ? this.appleSprite.material.opacity : 1.0;
+        const step = (now) => {
+            const t = Math.min(1, (now - start) / durationMs);
+            const newOp = startOpacity * (1 - t);
+            try{ this.appleSprite.material.opacity = newOp; } catch(e){}
+            if (t < 1){ this._appleFadeTween = { cancel: false }; requestAnimationFrame(step); }
+            else {
+                try{
+                    this.appleSprite.visible = false;
+                    this.appleSprite.material.opacity = 0.0;
+                }catch(e){}
+                this._appleFadeTween = null;
+            }
+        };
+        requestAnimationFrame(step);
     }
 
     _setupAvatarMorphs(child){
@@ -256,6 +349,7 @@ class FBXViewer {
                 const canvas = document.createElement('canvas'); canvas.width = texWidth; canvas.height = texHeight; const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,texWidth,texHeight);
                 for (const ins of instructions){
                     if (ins.type === 'text'){ ctx.fillStyle = ins.color || '#fff'; ctx.font = ins.font || `${Math.floor(texHeight * 0.04)}px sans-serif`; ctx.textAlign = ins.align || 'left'; ctx.textBaseline = ins.baseline || 'top'; ctx.fillText(ins.text, ins.x || 0, ins.y || 0); }
+
                     else if (ins.type === 'image' && ins.url){
                         try{ const img = await new Promise((res, rej)=>{ const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = ()=> res(i); i.onerror = rej; i.src = ins.url; }); const w = ins.width || img.width; const h = ins.height || img.height; ctx.drawImage(img, ins.x || 0, ins.y || 0, w, h);} catch(e){ console.error('Failed to load instruction image', e); }
                     } else if (ins.type === 'line'){ ctx.strokeStyle = ins.color || '#fff'; ctx.lineWidth = ins.width || 2; ctx.beginPath(); ctx.moveTo(ins.from[0], ins.from[1]); ctx.lineTo(ins.to[0], ins.to[1]); ctx.stroke(); }
@@ -309,7 +403,10 @@ class FBXViewer {
                     scaledHeadPos.add(offset);
                     this.appleSprite.position.copy(scaledHeadPos);
                     // ensure sprite faces the camera (Three.Sprite does this by default)
-                    this.appleSprite.visible = true;
+                    // do not force visibility here; visibility and opacity are controlled by gaze logic
+                    try{
+                        if (typeof this.appleSprite.material.opacity === 'number' && this.appleSprite.material.opacity > 0) this.appleSprite.visible = true;
+                    }catch(e){}
                 }
             } catch(e){ /* non-fatal */ }
             this.renderer.render(this.scene, this.camera);

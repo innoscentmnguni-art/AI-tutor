@@ -89,6 +89,8 @@ class GazeClient {
         if (enable && !this._rafHandle){
             this._rafHandle = requestAnimationFrame(()=> this._pollLoop());
         }
+        // notify other modules about tracking state
+        try { window.dispatchEvent(new CustomEvent('gaze-tracking', { detail: { enabled: !!enable } })); } catch(e) { /* ignore */ }
     }
 
     async startWebcam(){
@@ -155,7 +157,9 @@ class GazeClient {
         }
         const angleEl = document.getElementById('gaze-angle');
         if (angleEl) angleEl.textContent = data.gaze_angle != null ? `Gaze Angle: ${data.gaze_angle.toFixed(1)}°` : 'Gaze Angle: --';
-        this.setStatus(data.engaged ? 'ENGAGED' : 'NOT ENGAGED', data.engaged ? '#2b8a3e' : '#8a2222');
+    this.setStatus(data.engaged ? 'ENGAGED' : 'NOT ENGAGED', data.engaged ? '#2b8a3e' : '#8a2222');
+    // notify other modules about engagement state
+    try { window.dispatchEvent(new CustomEvent('gaze-engagement', { detail: { engaged: !!data.engaged } })); } catch(e) { /* ignore */ }
     }
 
     hideProcessedImage(){
