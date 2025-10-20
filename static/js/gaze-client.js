@@ -34,7 +34,8 @@ class GazeClient {
         // Toggle button only (no calibrate button since calibration happens on a separate page)
         this.toggleBtn = document.createElement('button');
         this.toggleBtn.textContent = 'Turn On';
-        this.toggleBtn.className = 'btn btn-secondary';
+        this.toggleBtn.className = 'btn btn-primary';
+        this.toggleBtn.style.width = '120px';  // Fixed width for consistency
 
         // Append toggle button to the wrapper, then wrapper to container
         this.controlsWrap.appendChild(this.toggleBtn);
@@ -83,6 +84,11 @@ class GazeClient {
     setTrackingEnabled(enable){
         this.trackingEnabled = enable;
         this.toggleBtn.textContent = enable ? 'Turn Off' : 'Turn On';
+        // show or hide gaze angle display depending on tracking state
+        try{
+            const angleEl = document.getElementById('gaze-angle');
+            if (angleEl) angleEl.style.display = enable ? 'block' : 'none';
+        }catch(e){}
         if (enable && !this._rafHandle){
             this._rafHandle = requestAnimationFrame(()=> this._pollLoop());
         }
@@ -107,6 +113,11 @@ class GazeClient {
         }catch(e){ console.warn('Error stopping camera', e); }
         this.video.srcObject = null;
         this.streaming = false;
+        // also hide gaze angle when webcam stops
+        try{
+            const angleEl = document.getElementById('gaze-angle');
+            if (angleEl) angleEl.style.display = 'none';
+        }catch(e){}
     }
 
     stop(){

@@ -85,8 +85,8 @@
                     <!-- Hidden raw video (used for capture) -->
                     <video id="webcam" width="300" height="225" autoplay muted style="display:none; visibility:hidden;"></video>
                     <img id="processed-frame" width="300" height="225" style="border: 2px solid #ccc; border-radius: 8px; margin-bottom: 12px; display: none;" />
-                    <div id="gaze-angle" style="font-size: 0.95em; color: #ddd; margin-bottom: 8px;">Gaze Angle: --</div>
-                    <div id="engagement-status" style="font-size: 1.2em; font-weight: bold; color: #fff; background: #444; padding: 8px 16px; border-radius: 6px; margin-top: 8px;">Status: Unknown</div>
+                    <div id="gaze-angle" style="font-size: 0.95em; color: #ddd; margin-bottom: 8px; display: none;">Gaze Angle: --</div>
+                    <div id="engagement-status" style="font-size: 1.2em; font-weight: bold; color: #fff; background: #444; padding: 8px 16px; border-radius: 6px; margin-top: 8px;">Eye tracking off</div>
                 </div>
                 <div class="d-none d-md-block">
                     <ul class="list-unstyled mb-0">
@@ -141,5 +141,6 @@
     <script type="module">
         import "{{ url_for('static', filename='js/fbx-viewer.js') }}";
         import "{{ url_for('static', filename='js/script.js') }}";
+        import "{{ url_for('static', filename='js/gaze-client.js') }}";
     </script>
 {% endblock %}
