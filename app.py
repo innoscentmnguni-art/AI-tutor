@@ -99,19 +99,14 @@ SYSTEM_PROMPT += (
     "- Do not use supernova/explosion metaphors to describe the learning process unless the user brings them up; if they do, acknowledge and move on quickly.\n"
 )
 
-def _make_speech_synthesizer():
+def text_to_speech(text):
     speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
     speech_config.speech_synthesis_voice_name = "en-ZA-LukeNeural"
     filename = os.path.join(tempfile.gettempdir(), f"speech_{uuid.uuid4()}.wav")
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filename)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-    return synthesizer, filename
 
-
-def text_to_speech(text):
-    synthesizer, filename = _make_speech_synthesizer()
     visemes = []
-
     def viseme_callback(evt):
         visemes.append({
             "offset": evt.audio_offset / 10000,  # ms
@@ -133,16 +128,20 @@ def home():
 
 def generate_response(prompt):
     try:
+        # Prepend system prompt to guide model behavior. Gemini client expects text content,
+        # so send a single concatenated string rather than a custom dict.
         combined_prompt = SYSTEM_PROMPT + "\n\nUser: " + str(prompt)
         response = model.generate_content(combined_prompt)
         if response and hasattr(response, 'text'):
             return response.text
-        print("No valid response received from the model")
+        else:
+            print("No valid response received from the model")
+            return None
     except Exception as e:
         print(f"Error generating response: {str(e)}")
         if hasattr(e, 'status_code'):
             print(f"Status code: {e.status_code}")
-    return None
+        return None
 
 
 def render_latex_to_file(latex):
@@ -193,10 +192,11 @@ def synthesize():
             'success': True,
             'audio_url': f'/audio/{os.path.basename(audio_file)}',
             'visemes': visemes,
-            'board_text': board_text
+            'board_text': board_text  # Send the board text to display
         }
         return jsonify(resp)
-    return jsonify({'error': 'Failed to synthesize speech'}), 500
+    else:
+        return jsonify({'error': 'Failed to synthesize speech'}), 500
 
 
 @app.route('/greeting')

@@ -45,7 +45,7 @@ class ScreenEngagementDetector:
     def _init_gaze_tracking_vars(self):
         """Initialize gaze tracking variables."""
         self.gaze_history = deque(maxlen=10)
-        self.ENGAGEMENT_ANGLE_THRESHOLD = 5.0
+        self.ENGAGEMENT_ANGLE_THRESHOLD = 10.0
         
     def _init_engagement_vars(self):
         """Initialize engagement tracking variables."""

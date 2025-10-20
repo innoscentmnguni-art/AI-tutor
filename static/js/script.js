@@ -42,7 +42,7 @@ class ThemeManager {
 }
 
 class AudioManager {
-    static waitForTrueEnd(audio, minSilenceMs = 1500) {
+    static waitForTrueEnd(audio, minSilenceMs = 800) {
         return new Promise((resolve) => {
             let silenceTimer = null;
             let resolved = false;
