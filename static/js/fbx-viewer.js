@@ -169,7 +169,54 @@ class FBXViewer {
         });
         this.scene.add(object);
         this._createSampleBoard(object);
+        // create apple sprite attached to avatar head
+        try { this._createAppleSprite(object); } catch(e){ console.error('Failed to create apple sprite', e); }
         this.fbxLoader.load(this.animPath, (anim)=> this._onAnimLoaded(anim, object), undefined, (err) => console.error('Failed to load idle animation:', err));
+    }
+
+    _createAppleSprite(object){
+        // create a small canvas texture with an apple emoji drawn centrally
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        // transparent background
+        ctx.clearRect(0,0,size,size);
+        // draw emoji using font; fallback to a red circle if emoji unsupported
+        const fontSize = Math.floor(size * 0.7);
+        ctx.font = `${fontSize}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        try{
+            ctx.fillText('🍎', size/2, size/2);
+        }catch(e){
+            // draw a simple red apple graphic
+            ctx.fillStyle = '#c62828';
+            ctx.beginPath(); ctx.arc(size/2, size/2, size*0.28, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#2e7d32'; ctx.fillRect(size/2 + size*0.12, size/2 - size*0.28, size*0.05, size*0.2);
+        }
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(12,12,1); // adjust to roughly head size; tuned for model scale
+        sprite.name = 'appleSprite';
+        this.scene.add(sprite);
+        this.appleSprite = sprite;
+
+        // store reference to avatar object for positioning; prefer AvatarHead or model root
+        this.avatarObject = object;
+        // initial hide until positioned
+        sprite.visible = false;
+
+        // expose simple helpers for runtime tweaking from console
+        try{
+            window.toggleAppleSprite = (v) => { if (!this.appleSprite) return; this.appleSprite.visible = typeof v === 'boolean' ? v : !this.appleSprite.visible; };
+            window.setAppleSpriteScale = (s) => { if (!this.appleSprite) return; const val = typeof s === 'number' ? s : 18; this.appleSprite.scale.set(val, val, 1); };
+        }catch(e){ /* ignore */ }
     }
 
     _setupAvatarMorphs(child){
@@ -242,6 +289,29 @@ class FBXViewer {
             const delta = this.clock.getDelta();
             if (this.mixer) this.mixer.update(delta);
             this.controls.update();
+            // update apple sprite to follow avatar head
+            try{
+                if (this.appleSprite && this.avatarObject){
+                    // prefer morph mesh if available (set in _setupAvatarMorphs)
+                    let headWorldPos = new THREE.Vector3();
+                    if (window.avatarMorphMesh){
+                        window.avatarMorphMesh.getWorldPosition(headWorldPos);
+                    } else {
+                        const head = this.avatarObject.getObjectByName && this.avatarObject.getObjectByName('AvatarHead');
+                        if (head) head.getWorldPosition(headWorldPos);
+                        else this.avatarObject.getWorldPosition(headWorldPos);
+                    }
+                    // the avatar is scaled (e.g., 55). Multiply head position by avatar scale so offsets scale with model
+                    const avatarScale = (this.avatarObject && this.avatarObject.scale) ? (this.avatarObject.scale.x || this.avatarObject.scale.y || this.avatarObject.scale.z || 1) : 1;
+                    const scaledHeadPos = new THREE.Vector3(headWorldPos.x, headWorldPos.y , headWorldPos.z);
+                    // offset sprite slightly above the head (scaled)
+                    const offset = new THREE.Vector3(-1, 1.7 * avatarScale, 20);
+                    scaledHeadPos.add(offset);
+                    this.appleSprite.position.copy(scaledHeadPos);
+                    // ensure sprite faces the camera (Three.Sprite does this by default)
+                    this.appleSprite.visible = true;
+                }
+            } catch(e){ /* non-fatal */ }
             this.renderer.render(this.scene, this.camera);
         };
         loop();
