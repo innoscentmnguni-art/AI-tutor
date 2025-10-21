@@ -104,8 +104,8 @@ class FBXViewer {
 
     _loadAssets(){
         const classroomPath = '/static/fbx/ClassRoom.fbx';
-        const modelPath = '/static/fbx/model.fbx';
-        const animPath = '/static/fbx/model@Idle.fbx';
+        const modelPath = '/static/fbx/yonela.fbx';
+        const animPath = '/static/fbx/Idle.fbx';
 
         this.fbxLoader.load(classroomPath, (classroomObj) => this._onClassroomLoaded(classroomObj), undefined, (err) => console.error('Error loading classroom FBX:', err));
         this.modelPath = modelPath;
@@ -149,8 +149,8 @@ class FBXViewer {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, width, height);
         ctx.fillStyle = '#fff';
-        const fontSize = Math.floor(height * 0.08);
-        ctx.font = `bold ${fontSize}px sans-serif`;
+        const fontSize = Math.floor(height * 0.05);
+        ctx.font = `${fontSize}px "Times New Roman", Times, serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         const margin = Math.floor(height * 0.05);
@@ -375,6 +375,9 @@ class FBXViewer {
                 window.updateSampleText = (...args) => { try{ return this.sampleBoard.updateText(...args); } catch(e){} };
                 window.drawInstructionsToBoard = (...args) => { try{ return this.sampleBoard.drawInstructions(...args); } catch(e){} };
                 window.setSampleBoardOffset = (...args) => { try{ return this.sampleBoard.setOffset(...args); } catch(e){} };
+                // expose the sampleBoard instance and combined helper for console use
+                try { window.sampleBoard = this.sampleBoard; } catch(e) {}
+                window.updateSampleTextCombined = (...args) => { try { return this.sampleBoard.updateCombined(...args); } catch(e){} };
             }catch(e){ /* ignore */ }
             console.log('Created sampleTextBoard via SampleBoard class (use updateSampleText / setSampleBoardOffset to tweak)');
         } catch (e){ console.error('Failed to create sample text board', e); }

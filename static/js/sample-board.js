@@ -51,8 +51,9 @@ export default class SampleBoard {
     canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,width,height);
     ctx.fillStyle = '#fff';
-    const fontSize = Math.floor(height * 0.08);
-    ctx.font = `bold ${fontSize}px sans-serif`;
+  const fontSize = Math.floor(height * 0.08);
+  // use normal (non-bold) Times New Roman for plaintext
+  ctx.font = `${fontSize}px "Times New Roman", Times, serif`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     const margin = Math.floor(height * 0.05); const maxWidth = width - (margin * 2);
     const lineHeight = fontSize * 1.2; const paragraphs = String(text).split('\n');
@@ -69,6 +70,93 @@ export default class SampleBoard {
       if (line){ ctx.fillText(line, margin, y - yOffset); y += lineHeight * 1.5; }
     }
     return { canvas, contentHeight: y, canvasHeight: height };
+  }
+
+  // Compose a sequence of elements (text or latex) into one combined texture.
+  // elements: [{ type: 'text', text: '...', x?:number }, { type: 'latex', latex: '...', width?:number, height?:number, x?:number }, ...]
+  // Order of elements is preserved. Each element is rendered to its own canvas then stacked vertically with small spacing.
+  async updateCombined(elements = [], texWidth = this.texWidth, texHeight = this.texHeight){
+    if (!this._sampleTextBoard) return;
+    if (!Array.isArray(elements)) return;
+    // cache for redraw/scroll
+    this._mode = 'combined';
+    try{ this._lastCombinedElements = JSON.parse(JSON.stringify(elements)); } catch(e){ this._lastCombinedElements = elements; }
+  // reduce spacing slightly (approx 10% smaller than previous 12)
+  const spacing = 5;
+    const elementCanvases = [];
+    // Render each element to its own canvas and compute heights
+    for (const el of elements){
+      if (!el) continue;
+      if (el.type === 'text'){
+        const text = String(el.text || '');
+        // Use _createCanvasForText to layout text within texWidth x texHeight; it returns contentHeight
+        const { canvas: textCanvas, contentHeight } = this._createCanvasForText(text, texWidth, texHeight, 0);
+        // crop to content height
+        const cropH = Math.max( Math.min(contentHeight, textCanvas.height), 1 );
+        const outCanvas = document.createElement('canvas'); outCanvas.width = texWidth; outCanvas.height = cropH;
+        const outCtx = outCanvas.getContext('2d'); outCtx.clearRect(0,0,outCanvas.width,outCanvas.height);
+        outCtx.drawImage(textCanvas, 0, 0, texWidth, cropH, 0, 0, texWidth, cropH);
+        elementCanvases.push({ canvas: outCanvas, x: (typeof el.x === 'number') ? el.x : 0, height: outCanvas.height });
+      } else if (el.type === 'latex'){
+        const latex = String(el.latex || '');
+        // choose render height for latex element
+        const desiredH = (typeof el.height === 'number') ? el.height : Math.floor(texHeight * 0.15);
+        const desiredW = (typeof el.width === 'number') ? el.width : texWidth;
+        try{
+          // allow callers to request a strict pixel height for LaTeX rendering
+          const opts = {};
+          if (typeof el.strictHeightPx === 'number') opts.strictHeightPx = el.strictHeightPx;
+          // pass inlineCss if present
+          if (el.inlineCss) opts.inlineCss = el.inlineCss;
+          const tex = await LatexClient.latexToTexture(latex, desiredW, desiredH, opts);
+          // CanvasTexture.image should be the canvas used to create the texture
+          const imgCanvas = tex && tex.image ? tex.image : null;
+          if (imgCanvas && imgCanvas instanceof HTMLCanvasElement){
+            elementCanvases.push({ canvas: imgCanvas, x: (typeof el.x === 'number') ? el.x : 0, height: imgCanvas.height });
+          } else {
+            // fallback: render latex source as plain text
+            const fallback = document.createElement('canvas'); fallback.width = texWidth; fallback.height = Math.floor(texHeight * 0.06);
+            const fctx = fallback.getContext('2d'); fctx.fillStyle = '#fff'; fctx.font = `${Math.floor(fallback.height * 0.9)}px "Times New Roman", Times, serif`; fctx.textBaseline = 'top'; fctx.fillText(latex, 0, 0);
+            elementCanvases.push({ canvas: fallback, x: (typeof el.x === 'number') ? el.x : 0, height: fallback.height });
+          }
+        } catch(e){
+          // on error, fallback to plain text canvas
+          const fallback = document.createElement('canvas'); fallback.width = texWidth; fallback.height = Math.floor(texHeight * 0.06);
+          const fctx = fallback.getContext('2d'); fctx.fillStyle = '#fff'; fctx.font = `${Math.floor(fallback.height * 0.9)}px "Times New Roman", Times, serif`; fctx.textBaseline = 'top'; fctx.fillText(latex, 0, 0);
+          elementCanvases.push({ canvas: fallback, x: (typeof el.x === 'number') ? el.x : 0, height: fallback.height });
+        }
+      } else {
+        // unknown type: ignore
+      }
+    }
+
+    // compute combined height
+    let totalHeight = 0;
+    for (const ec of elementCanvases) totalHeight += ec.height + spacing;
+    if (totalHeight <= 0) totalHeight = texHeight;
+    // create stacked final canvas
+    const stackedCanvas = document.createElement('canvas'); stackedCanvas.width = texWidth; stackedCanvas.height = totalHeight;
+    const sctx = stackedCanvas.getContext('2d'); sctx.clearRect(0,0,stackedCanvas.width,stackedCanvas.height);
+    let y = 0;
+    for (const ec of elementCanvases){
+      const drawX = ec.x || 0;
+      sctx.drawImage(ec.canvas, 0, 0, ec.canvas.width, ec.canvas.height, drawX, y, ec.canvas.width, ec.height);
+      y += ec.height + spacing;
+    }
+
+    // crop viewport canvas according to current scroll
+    const viewY = Math.max(0, Math.min(this._sampleBoardScrollY || 0, Math.max(0, stackedCanvas.height - texHeight)));
+    const viewportCanvas = document.createElement('canvas'); viewportCanvas.width = texWidth; viewportCanvas.height = texHeight;
+    const vctx = viewportCanvas.getContext('2d'); vctx.clearRect(0,0,viewportCanvas.width,viewportCanvas.height);
+    vctx.drawImage(stackedCanvas, 0, viewY, texWidth, texHeight, 0, 0, texWidth, texHeight);
+
+    // convert to texture and apply
+    const tex = this._canvasToTexture(viewportCanvas);
+    const mat = this._sampleTextBoard.material; if (mat.map) this._safeDisposeTexture(mat.map); mat.map = tex; mat.needsUpdate = true;
+    // update internal metrics for scrolling
+    this._sampleBoardContentHeight = totalHeight;
+    this._sampleBoardCanvasHeight = texHeight;
+    console.log('updateCombined applied', { elements: elements.length, stackedHeight: stackedCanvas.height, viewY });
   }
 
   _canvasToTexture(canvas){
@@ -126,6 +214,9 @@ export default class SampleBoard {
       if (this._mode === 'instructions' && this._lastInstructions){
         // re-run drawInstructions with cached instructions
         this.drawInstructions(this._lastInstructions, this.texWidth, this.texHeight);
+      } else if (this._mode === 'combined' && this._lastCombinedElements){
+        // re-run combined render with cached elements (preserves scroll)
+        this.updateCombined(this._lastCombinedElements, this.texWidth, this.texHeight);
       } else {
         // text mode
         this.updateText(this._lastSampleText, this.texWidth, this.texHeight, { useLatex: !!this._lastUseLatex, inlineCss: this._lastInlineCss });

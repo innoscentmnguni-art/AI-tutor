@@ -44,10 +44,45 @@ class MathJaxClient {
     });
   }
 
-  static async imageToCanvasTexture(img, width, height){
+  static async imageToCanvasTexture(img, width, height, opts = {}){
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,width,height);
-    ctx.drawImage(img, 0, 0, width, height);
+    // Preserve SVG/image aspect ratio and scale the rendered math to a target font height
+    // so it doesn't stretch to fill the entire texture. This matches behavior of plain text
+    // which uses a font size relative to texHeight (see sample-board.js fontSize = texHeight * 0.08).
+    const imgW = (img.naturalWidth || img.width);
+    const imgH = (img.naturalHeight || img.height);
+    if (imgW > 0 && imgH > 0){
+      // If caller supplied a strict pixel height for the equation rendering, use that.
+      const strictH = (opts && typeof opts.strictHeightPx === 'number') ? Math.max(1, Math.floor(opts.strictHeightPx) === 140) : null;
+      if (strictH){
+        // Scale the SVG so its rendered height equals strictH (unless it exceeds canvas bounds)
+        const scale = strictH / imgH;
+        const drawH = Math.min(Math.max(1, Math.floor(imgH * scale)), canvas.height - 8);
+        const drawW = Math.min(Math.max(1, Math.floor(imgW * scale)), canvas.width - 8);
+        const dx = Math.floor((canvas.width - drawW) / 2);
+        const dy = Math.floor((canvas.height - drawH) / 2);
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
+      } else {
+        // target font height fraction (match sample-board ~0.08 of canvas height)
+        const targetFraction = 0.08 * 6; // LaTeX equations are typically taller; use a slightly larger fraction (0.48) to keep legible
+        // Compute a scale so that the image height becomes approximately targetFraction * canvas.height,
+        // but don't exceed canvas bounds. Also leave small margins.
+        const desiredHeight = Math.min(Math.floor(canvas.height * targetFraction), canvas.height - 8);
+        const scale = desiredHeight / imgH;
+        const drawW = Math.min(Math.floor(imgW * scale), canvas.width - 8);
+        const drawH = Math.min(Math.floor(imgH * scale), canvas.height - 8);
+        const dx = Math.floor((canvas.width - drawW) / 2);
+        const dy = Math.floor((canvas.height - drawH) / 2);
+        // fill transparent background (expected) then draw centered scaled image
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
+      }
+    } else {
+      // fallback: stretch if we don't have intrinsic size
+      ctx.drawImage(img, 0, 0, width, height);
+    }
     const tex = new THREE.CanvasTexture(canvas); tex.encoding = THREE.sRGBEncoding; tex.needsUpdate = true; return tex;
   }
 
@@ -63,6 +98,9 @@ class MathJaxClient {
     // Ensure SVG elements use a visible color for dark backgrounds.
     // Default color is white unless opts.color is provided.
     const color = (opts && opts.color) ? String(opts.color) : '#ffffff';
+    // bold rendering control: by default make equations appear bolder to match canvas text weight
+    const makeBold = (opts && typeof opts.bold !== 'undefined') ? !!opts.bold : true;
+    const strokeWidth = (opts && typeof opts.strokeWidth !== 'undefined') ? String(opts.strokeWidth) : (makeBold ? '1.2' : '0');
     try{
       // Operate on a cloned node to avoid mutating MathJax internals
       const cloned = svg.cloneNode(true);
@@ -75,10 +113,16 @@ class MathJaxClient {
         } catch(e){}
         try{ el.setAttribute('fill', color); } catch(e){}
         try{ el.setAttribute('stroke', color); } catch(e){}
+        try{ el.setAttribute('stroke-width', strokeWidth); } catch(e){}
+        try{ el.setAttribute('stroke-linejoin', 'round'); } catch(e){}
+        try{ el.setAttribute('stroke-linecap', 'round'); } catch(e){}
       }
       // Also set attributes on the root svg
       try{ cloned.setAttribute('fill', color); } catch(e){}
       try{ cloned.setAttribute('stroke', color); } catch(e){}
+      try{ cloned.setAttribute('stroke-width', strokeWidth); } catch(e){}
+      try{ cloned.setAttribute('stroke-linejoin', 'round'); } catch(e){}
+      try{ cloned.setAttribute('stroke-linecap', 'round'); } catch(e){}
       // Serialize the modified SVG
       var svgString = new XMLSerializer().serializeToString(cloned);
     } catch(e){
@@ -102,8 +146,22 @@ class MathJaxClient {
         try{
           const cloned = svg.cloneNode(true);
           const all = cloned.querySelectorAll('*');
-          for (const el of all){ try{ el.removeAttribute('style'); }catch(e){} try{ el.setAttribute('fill', color); }catch(e){} try{ el.setAttribute('stroke', color); }catch(e){} }
-          try{ cloned.setAttribute('fill', color); }catch(e){} try{ cloned.setAttribute('stroke', color); }catch(e){}
+          // default to bold in debugRender as well
+          const makeBoldDebug = true;
+          const strokeWidthDebug = makeBoldDebug ? '1.2' : '0';
+          for (const el of all){
+            try{ el.removeAttribute('style'); }catch(e){}
+            try{ el.setAttribute('fill', color); }catch(e){}
+            try{ el.setAttribute('stroke', color); }catch(e){}
+            try{ el.setAttribute('stroke-width', strokeWidthDebug); }catch(e){}
+            try{ el.setAttribute('stroke-linejoin', 'round'); }catch(e){}
+            try{ el.setAttribute('stroke-linecap', 'round'); }catch(e){}
+          }
+          try{ cloned.setAttribute('fill', color); }catch(e){}
+          try{ cloned.setAttribute('stroke', color); }catch(e){}
+          try{ cloned.setAttribute('stroke-width', strokeWidthDebug); }catch(e){}
+          try{ cloned.setAttribute('stroke-linejoin', 'round'); }catch(e){}
+          try{ cloned.setAttribute('stroke-linecap', 'round'); }catch(e){}
           out.html = new XMLSerializer().serializeToString(cloned);
         } catch(e){ out.html = new XMLSerializer().serializeToString(svg); }
       } else {
