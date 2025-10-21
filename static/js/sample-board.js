@@ -82,7 +82,7 @@ export default class SampleBoard {
     this._mode = 'combined';
     try{ this._lastCombinedElements = JSON.parse(JSON.stringify(elements)); } catch(e){ this._lastCombinedElements = elements; }
   // reduce spacing slightly (approx 10% smaller than previous 12)
-  const spacing = 5;
+  const spacing = 0;
     const elementCanvases = [];
     // Render each element to its own canvas and compute heights
     for (const el of elements){
@@ -103,11 +103,17 @@ export default class SampleBoard {
         const desiredH = (typeof el.height === 'number') ? el.height : Math.floor(texHeight * 0.15);
         const desiredW = (typeof el.width === 'number') ? el.width : texWidth;
         try{
-          // allow callers to request a strict pixel height for LaTeX rendering
           const opts = {};
-          if (typeof el.strictHeightPx === 'number') opts.strictHeightPx = el.strictHeightPx;
+          
           // pass inlineCss if present
           if (el.inlineCss) opts.inlineCss = el.inlineCss;
+          if (typeof el.charSizePx === 'number') {
+            opts.charSizePx = Math.max(8, Math.floor(el.charSizePx));
+          } else {
+            opts.charSizePx = Math.max(12, Math.floor(texHeight * 0.09));
+          }
+          // ensure display math by default
+          opts.display = (typeof el.display === 'boolean') ? el.display : true;
           const tex = await LatexClient.latexToTexture(latex, desiredW, desiredH, opts);
           // CanvasTexture.image should be the canvas used to create the texture
           const imgCanvas = tex && tex.image ? tex.image : null;

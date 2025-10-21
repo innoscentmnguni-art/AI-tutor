@@ -47,38 +47,19 @@ class MathJaxClient {
   static async imageToCanvasTexture(img, width, height, opts = {}){
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,width,height);
-    // Preserve SVG/image aspect ratio and scale the rendered math to a target font height
-    // so it doesn't stretch to fill the entire texture. This matches behavior of plain text
-    // which uses a font size relative to texHeight (see sample-board.js fontSize = texHeight * 0.08).
     const imgW = (img.naturalWidth || img.width);
     const imgH = (img.naturalHeight || img.height);
     if (imgW > 0 && imgH > 0){
-      // If caller supplied a strict pixel height for the equation rendering, use that.
-      const strictH = (opts && typeof opts.strictHeightPx === 'number') ? Math.max(1, Math.floor(opts.strictHeightPx) === 140) : null;
-      if (strictH){
-        // Scale the SVG so its rendered height equals strictH (unless it exceeds canvas bounds)
-        const scale = strictH / imgH;
-        const drawH = Math.min(Math.max(1, Math.floor(imgH * scale)), canvas.height - 8);
-        const drawW = Math.min(Math.max(1, Math.floor(imgW * scale)), canvas.width - 8);
-        const dx = Math.floor((canvas.width - drawW) / 2);
-        const dy = Math.floor((canvas.height - drawH) / 2);
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
-      } else {
-        // target font height fraction (match sample-board ~0.08 of canvas height)
-        const targetFraction = 0.08 * 6; // LaTeX equations are typically taller; use a slightly larger fraction (0.48) to keep legible
-        // Compute a scale so that the image height becomes approximately targetFraction * canvas.height,
-        // but don't exceed canvas bounds. Also leave small margins.
-        const desiredHeight = Math.min(Math.floor(canvas.height * targetFraction), canvas.height - 8);
-        const scale = desiredHeight / imgH;
-        const drawW = Math.min(Math.floor(imgW * scale), canvas.width - 8);
-        const drawH = Math.min(Math.floor(imgH * scale), canvas.height - 8);
-        const dx = Math.floor((canvas.width - drawW) / 2);
-        const dy = Math.floor((canvas.height - drawH) / 2);
-        // fill transparent background (expected) then draw centered scaled image
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
-      }
+      const targetFraction = 0.48;
+      const desiredHeight = Math.min(Math.floor(canvas.height * targetFraction), canvas.height - 8);
+      const scale = desiredHeight / imgH;
+      const drawW = Math.min(Math.floor(imgW * scale), canvas.width - 8);
+      const drawH = Math.min(Math.floor(imgH * scale), canvas.height - 8);
+      const dx = Math.floor((canvas.width - drawW) / 2);
+      const dy = Math.floor((canvas.height - drawH) / 2);
+      // fill transparent background (expected) then draw centered scaled image
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
     } else {
       // fallback: stretch if we don't have intrinsic size
       ctx.drawImage(img, 0, 0, width, height);
@@ -90,11 +71,26 @@ class MathJaxClient {
   static async latexToTexture(latex, width = 512, height = 256, opts = {}){
     const MathJax = await MathJaxClient._ensureMathJax();
     if (!MathJax) throw new Error('MathJax not available');
-    // render to SVG node
-    const node = await MathJax.tex2svgPromise(String(latex || ''), { display: true });
-    // MathJax returns a document fragment; extract the SVG element
-    const svg = node.getElementsByTagName && node.getElementsByTagName('svg') ? node.getElementsByTagName('svg')[0] : null;
-    if (!svg) throw new Error('MathJax did not produce SVG');
+      // Prefer using tex2svgPromise with em/ex options when a target character size is requested.
+      // MathJax accepts em/ex options which scale the font metrics used in the generated SVG.
+      let svg = null;
+      const charSizePx = (opts && typeof opts.charSizePx === 'number') ? Math.max(1, Math.floor(opts.charSizePx)) : null;
+      const display = (opts && typeof opts.display !== 'undefined') ? !!opts.display : true;
+      try{
+        if (charSizePx){
+          const em = charSizePx;
+          const ex = Math.max(1, Math.round(em * 0.5));
+          const node = await MathJax.tex2svgPromise(String(latex || ''), { display: display, em: em, ex: ex });
+          svg = node.getElementsByTagName && node.getElementsByTagName('svg') ? node.getElementsByTagName('svg')[0] : null;
+        } else {
+          // Default rendering
+          const node = await MathJax.tex2svgPromise(String(latex || ''), { display: display });
+          svg = node.getElementsByTagName && node.getElementsByTagName('svg') ? node.getElementsByTagName('svg')[0] : null;
+        }
+      } catch(e){
+        // Do not attempt a fallback render here — surface the error to the caller.
+        throw new Error('MathJax tex2svgPromise failed: ' + (e && e.message ? e.message : String(e)));
+      }
     // Ensure SVG elements use a visible color for dark backgrounds.
     // Default color is white unless opts.color is provided.
     const color = (opts && opts.color) ? String(opts.color) : '#ffffff';
@@ -123,54 +119,39 @@ class MathJaxClient {
       try{ cloned.setAttribute('stroke-width', strokeWidth); } catch(e){}
       try{ cloned.setAttribute('stroke-linejoin', 'round'); } catch(e){}
       try{ cloned.setAttribute('stroke-linecap', 'round'); } catch(e){}
+      // Inject a small inline style to normalize internal MathJax element sizes so
+      // subscripts/superscripts and fraction parts render at consistent scale.
+      try{
+        const style = document.createElement('style');
+        style.textContent = `
+          /* User requested specific scaling for math parts */
+          /* Scripts (sub/superscripts) slightly larger */
+          mjx-script, mjx-sup, mjx-sub { font-size: 110% !important; line-height: 1 !important; }
+
+          /* Fractions (numerator/denominator) substantially larger for legibility */
+          mjx-numerator, mjx-denominator { font-size: 170% !important; display: inline-block !important; line-height: 1 !important; }
+
+          /* Square root symbol and contents slightly larger */
+          mjx-root { font-size: 105% !important; }
+
+          /* If there is an exponent inside the square root, make it a bit larger */
+          mjx-root mjx-sup, mjx-root mjx-sub { font-size: 115% !important; }
+        `;
+        // prepend the style node into the cloned svg if possible
+        try{ cloned.insertBefore(style, cloned.firstChild); } catch(e){ cloned.appendChild(style); }
+      } catch(e){}
       // Serialize the modified SVG
       var svgString = new XMLSerializer().serializeToString(cloned);
     } catch(e){
       // Fallback to original serialization if anything goes wrong
       var svgString = new XMLSerializer().serializeToString(svg);
     }
-    const img = await MathJaxClient.svgStringToImage(svgString);
-    // draw into texture sized to width/height (optionally scale preserving aspect)
-    return MathJaxClient.imageToCanvasTexture(img, width, height);
+  const img = await MathJaxClient.svgStringToImage(svgString);
+  // draw into texture sized to width/height (optionally scale preserving aspect)
+  return MathJaxClient.imageToCanvasTexture(img, width, height, opts);
   }
 
-  static async debugRender(latex){
-    const out = { ok: false, error: null, html: null };
-    try{
-      const MathJax = await MathJaxClient._ensureMathJax();
-      const node = await MathJax.tex2svgPromise(String(latex || ''), { display: true });
-      const svg = node.getElementsByTagName && node.getElementsByTagName('svg') ? node.getElementsByTagName('svg')[0] : null;
-      if (svg){
-        // Mirror the same coloring logic as latexToTexture so debugRender shows the final SVG
-        const color = '#ffffff';
-        try{
-          const cloned = svg.cloneNode(true);
-          const all = cloned.querySelectorAll('*');
-          // default to bold in debugRender as well
-          const makeBoldDebug = true;
-          const strokeWidthDebug = makeBoldDebug ? '1.2' : '0';
-          for (const el of all){
-            try{ el.removeAttribute('style'); }catch(e){}
-            try{ el.setAttribute('fill', color); }catch(e){}
-            try{ el.setAttribute('stroke', color); }catch(e){}
-            try{ el.setAttribute('stroke-width', strokeWidthDebug); }catch(e){}
-            try{ el.setAttribute('stroke-linejoin', 'round'); }catch(e){}
-            try{ el.setAttribute('stroke-linecap', 'round'); }catch(e){}
-          }
-          try{ cloned.setAttribute('fill', color); }catch(e){}
-          try{ cloned.setAttribute('stroke', color); }catch(e){}
-          try{ cloned.setAttribute('stroke-width', strokeWidthDebug); }catch(e){}
-          try{ cloned.setAttribute('stroke-linejoin', 'round'); }catch(e){}
-          try{ cloned.setAttribute('stroke-linecap', 'round'); }catch(e){}
-          out.html = new XMLSerializer().serializeToString(cloned);
-        } catch(e){ out.html = new XMLSerializer().serializeToString(svg); }
-      } else {
-        out.html = null;
-      }
-      out.ok = !!out.html;
-    } catch(e){ out.error = (e && e.message) ? e.message : String(e); }
-    return out;
-  }
+  
 }
 
 const LatexClient = MathJaxClient;

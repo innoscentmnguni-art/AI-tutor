@@ -1,6 +1,52 @@
 import { playAudioWithLipSync } from './lipsync.js';
 export const avatarEvents = new EventTarget();
 
+// Parse board text and split into elements for updateSampleTextCombined.
+// Recognizes display math $$...$$ and inline math $...$ and preserves order.
+function parseBoardTextToElements(boardText){
+    if (!boardText) return [];
+    const out = [];
+    let s = String(boardText);
+    // We will scan for $$...$$ first, then $...$ — using a single pass regex loop.
+    const regex = /(\$\$[\s\S]*?\$\$)|(\$[^\$\n][^\$]*?\$)/g;
+    let lastIndex = 0;
+    let m;
+    while ((m = regex.exec(s)) !== null){
+        const idx = m.index;
+        if (idx > lastIndex){
+            const plain = s.slice(lastIndex, idx);
+            out.push({ type: 'text', text: plain.trim() });
+        }
+        const match = m[0];
+        if (match.startsWith('$$')){
+            // strip delimiters
+            const inner = match.slice(2, -2).trim();
+            out.push({ type: 'latex', latex: inner });
+        } else if (match.startsWith('$')){
+            const inner = match.slice(1, -1).trim();
+            out.push({ type: 'latex', latex: inner });
+        }
+        lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < s.length){
+        const tail = s.slice(lastIndex);
+        out.push({ type: 'text', text: tail.trim() });
+    }
+    // merge consecutive text nodes and filter empty ones
+    const merged = [];
+    for (const e of out){
+        if (e.type === 'text'){
+            if (!e.text || !e.text.trim()) continue;
+            const prev = merged[merged.length - 1];
+            if (prev && prev.type === 'text') prev.text += '\n' + e.text;
+            else merged.push({ type: 'text', text: e.text });
+        } else {
+            merged.push(e);
+        }
+    }
+    return merged;
+}
+
 /*
  * Refactored script.js into small focused classes. Each class has a single responsibility
  * and the overall behavior is preserved: theme toggling, TTS request -> audio playback
@@ -355,8 +401,11 @@ class TTSManager {
             const res = await fetch('/greeting');
             if (!res.ok) return;
             const data = await res.json();
-            if (data.board_text && window.updateSampleText) {
-                try { window.updateSampleText(data.board_text); } catch(e) { console.error(e); }
+            if (data.board_text && window.updateSampleTextCombined) {
+                try {
+                    const elems = parseBoardTextToElements(data.board_text);
+                    window.updateSampleTextCombined(elems, 2048, 1024);
+                } catch(e) { console.error(e); }
             }
             if (data.audio_url) await AudioManager.playWithVisemes(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap);
         } catch (e) { console.error('Error fetching/playing greeting:', e); }
@@ -380,8 +429,11 @@ class TTSManager {
     async _handleSynthesizeResponse(data) {
         if (!data) return;
         if (data.success && data.audio_url) {
-            if (data.board_text && window.updateSampleText) {
-                try { window.updateSampleText(data.board_text); } catch(e) { console.error(e); }
+            if (data.board_text && window.updateSampleTextCombined) {
+                try {
+                    const elems = parseBoardTextToElements(data.board_text);
+                    window.updateSampleTextCombined(elems, 2048, 1024);
+                } catch(e) { console.error(e); }
             }
             // pause recording while avatar speaks to avoid capturing playback
             try { if (this.sr) { this.sr._pauseRecording(); this.ui.resetMicLevel(); } } catch(e){}
