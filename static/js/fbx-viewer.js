@@ -408,11 +408,7 @@ class FBXViewer {
                 const tex = new THREE.CanvasTexture(canvas); tex.encoding = THREE.sRGBEncoding; tex.needsUpdate = true; window.sampleTextBoard.material.map = tex; window.sampleTextBoard.material.needsUpdate = true; console.log('Drew instructions to board');
             };
 
-            // LaTeX rendering disabled — server endpoint removed
-            window.drawLaTeXOnBoard = async (latex, x = 0, y = 0, width = null, height = null) => {
-                console.warn('drawLaTeXOnBoard called but LaTeX rendering is disabled.');
-                return null;
-            };
+
 
             window.setSampleBoardOffset = (x = 5, y = 5, z = 0) => { if (!window.sampleTextBoard) return; const pos = new THREE.Vector3(); object.getWorldPosition(pos); pos.add(new THREE.Vector3(x, y, z)); window.sampleTextBoard.position.copy(pos); };
 

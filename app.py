@@ -173,9 +173,6 @@ def generate_response(prompt):
             print(f"Status code: {e.status_code}")
         return None
 
-
-# LaTeX rendering removed — server-side rendering endpoints disabled
-
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
     data = request.json
@@ -238,7 +235,7 @@ def greeting():
         return jsonify({'success': False}), 500
 
 
-# /render_latex endpoint removed. Static LaTeX serving disabled.
+
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):
