@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { avatarEvents } from './script.js';
+import LatexClient from './latex-client.js';
+import SampleBoard from './sample-board.js';
 
 const container = document.getElementById('fbx-container');
 
@@ -24,6 +26,12 @@ class FBXViewer {
         this._gazeTimer = null; // timer id for not-engaged -> show apple
         this._gazeNotEngagedSince = null;
         this._appleFadeTween = null; // used to track fade transitions
+        // sample board state (encapsulated)
+        this._sampleTextBoard = null; // THREE.Mesh
+        this._sampleBoardScrollY = 0;
+        this._sampleBoardContentHeight = 0;
+        this._sampleBoardCanvasHeight = 0;
+        this._lastSampleText = '';
         this._loadAssets();
         this._bindEvents();
         // listen for gaze events if available
@@ -106,7 +114,7 @@ class FBXViewer {
 
     _applyTextTextureToMesh(mesh, text){
         try {
-            const sampleTex = this._createTextTexture(text);
+            const sampleTex = this._createTextTexture(text, 1024, 512, 0);
             const mat = mesh.material && mesh.material.clone ? mesh.material.clone() : new THREE.MeshBasicMaterial();
             mat.map = sampleTex;
             mat.transparent = true;
@@ -117,9 +125,24 @@ class FBXViewer {
         }
     }
 
-    _createTextTexture(text, width = 1024, height = 512){
-        // Accept optional vertical offset via global state: window.sampleBoardScrollY
-        const yOffset = (window.sampleBoardScrollY && Number(window.sampleBoardScrollY)) ? Number(window.sampleBoardScrollY) : 0;
+    // Asynchronously apply a LaTeX-rendered texture to a mesh (mirrors _applyTextTextureToMesh)
+    async _applyLatexTextureToMesh(mesh, latex, width = 1024, height = 512, inlineCss = ''){
+        try {
+            const sampleTex = await LatexClient.latexToTexture(latex, width, height, inlineCss);
+            const mat = mesh.material && mesh.material.clone ? mesh.material.clone() : new THREE.MeshBasicMaterial();
+            // dispose previous map if present
+            if (mat.map) this._safeDisposeTexture(mat.map);
+            mat.map = sampleTex;
+            mat.transparent = true;
+            mat.side = THREE.DoubleSide;
+            mesh.material = mat;
+        } catch (e) {
+            console.error('Failed to apply latex texture', e);
+        }
+    }
+
+    // Creates a canvas with the rendered text and returns { canvas, contentHeight }
+    _createCanvasForText(text, width = 1024, height = 512, yOffset = 0){
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
@@ -133,7 +156,7 @@ class FBXViewer {
         const margin = Math.floor(height * 0.05);
         const maxWidth = width - (margin * 2);
         const lineHeight = fontSize * 1.2;
-        const paragraphs = text.split('\n');
+        const paragraphs = String(text).split('\n');
         let y = margin;
         for (const paragraph of paragraphs){
             const words = paragraph.split(' ');
@@ -142,7 +165,6 @@ class FBXViewer {
                 const testLine = line + (line ? ' ' : '') + word;
                 const metrics = ctx.measureText(testLine);
                 if (metrics.width > maxWidth && line){
-                    // draw at y - yOffset so we can scroll vertically
                     ctx.fillText(line, margin, y - yOffset);
                     line = word;
                     y += lineHeight;
@@ -152,14 +174,29 @@ class FBXViewer {
             }
             if (line){ ctx.fillText(line, margin, y - yOffset); y += lineHeight * 1.5; }
         }
-    // store content and canvas heights so scroll bounds can be computed
-    window.sampleBoardContentHeight = y;
-    window.sampleBoardCanvasHeight = height;
+        return { canvas, contentHeight: y, canvasHeight: height };
+    }
 
+    // Convert canvas -> Three.js texture
+    _canvasToTexture(canvas){
         const tex = new THREE.CanvasTexture(canvas);
         tex.encoding = THREE.sRGBEncoding;
         tex.needsUpdate = true;
         return tex;
+    }
+
+    // Safely dispose a texture if possible
+    _safeDisposeTexture(tex){
+        try{ if (tex && typeof tex.dispose === 'function') tex.dispose(); } catch(e){ /* ignore */ }
+    }
+
+    // Wrapper to create a texture from text and manage computed heights
+    _createTextTexture(text, width = 1024, height = 512, yOffset = 0){
+        const { canvas, contentHeight, canvasHeight } = this._createCanvasForText(text, width, height, yOffset);
+        // update instance scroll bounds
+        this._sampleBoardContentHeight = contentHeight;
+        this._sampleBoardCanvasHeight = canvasHeight;
+        return this._canvasToTexture(canvas);
     }
 
     _onClassroomLoaded(classroomObj){
@@ -185,7 +222,7 @@ class FBXViewer {
             }
         });
         this.scene.add(object);
-        this._createSampleBoard(object);
+    this._createSampleBoard(object);
         // create apple sprite attached to avatar head
         try { this._createAppleSprite(object); } catch(e){ console.error('Failed to create apple sprite', e); }
         this.fbxLoader.load(this.animPath, (anim)=> this._onAnimLoaded(anim, object), undefined, (err) => console.error('Failed to load idle animation:', err));
@@ -330,89 +367,16 @@ class FBXViewer {
     }
 
     _createSampleBoard(object){
+        try{
+            // instantiate SampleBoard and wire up convenience wrappers
+            this.sampleBoard = new SampleBoard({ scene: this.scene, rendererDom: this.renderer.domElement, modelObject: object });
+            // expose lightweight wrappers for console/debug
             try{
-            const initialText = 'Welcome\nMy name is Nova\nwhat would you like to learn today';
-            const boardWidth = 130; const boardHeight = 65;
-            const sampleTex = this._createTextTexture(initialText, 2048, 1024);
-            const boardMat = new THREE.MeshBasicMaterial({ map: sampleTex, transparent: true, side: THREE.DoubleSide });
-            boardMat.depthTest = true;
-            const boardGeo = new THREE.PlaneGeometry(boardWidth, boardHeight);
-            const boardMesh = new THREE.Mesh(boardGeo, boardMat);
-            boardMesh.name = 'sampleTextBoard';
-            const modelWorldPos = new THREE.Vector3();
-            object.getWorldPosition(modelWorldPos);
-            boardMesh.position.copy(modelWorldPos).add(new THREE.Vector3(80,80,-45));
-            this.scene.add(boardMesh);
-            window.sampleTextBoard = boardMesh;
-            // initialize global scroll state (pixels)
-            if (typeof window.sampleBoardScrollY === 'undefined') window.sampleBoardScrollY = 0;
-            if (typeof window.sampleBoardContentHeight === 'undefined') window.sampleBoardContentHeight = 0;
-            if (typeof window.sampleBoardCanvasHeight === 'undefined') window.sampleBoardCanvasHeight = 0;
-
-            // attach wheel and drag handlers to allow scrolling of the text on the board
-            try{
-                const dom = this.renderer.domElement;
-                let isPointerDown = false;
-                let lastPointerY = 0;
-
-                const clampScroll = () => {
-                    const maxScroll = Math.max(0, (window.sampleBoardContentHeight || 0) - (window.sampleBoardCanvasHeight || 1));
-                    if (window.sampleBoardScrollY < 0) window.sampleBoardScrollY = 0;
-                    if (window.sampleBoardScrollY > maxScroll) window.sampleBoardScrollY = maxScroll;
-                };
-
-                dom.addEventListener('wheel', (ev) => {
-                    // only scroll when pointer is over fbX container (event already scoped) and user uses wheel
-                    const delta = ev.deltaY;
-                    // apply sensitivity factor
-                    window.sampleBoardScrollY += delta * 0.6;
-                    clampScroll();
-                    // re-render the board texture using current text if available
-                    if (window.sampleTextBoard && window.sampleTextBoard.material && window.sampleTextBoard.material.map && window.sampleTextBoard.material.map.image) {
-                        // trigger a redraw by re-creating texture from the last used text if available
-                        // Note: callers should re-run updateSampleText when they change content; here we just refresh
-                        try{ window.updateSampleText(window._lastSampleText || initialText, 2048, 1024); } catch(e){}
-                    }
-                    ev.preventDefault();
-                }, { passive: false });
-
-                // pointer drag to pan
-                dom.addEventListener('pointerdown', (ev) => { isPointerDown = true; lastPointerY = ev.clientY; dom.setPointerCapture && dom.setPointerCapture(ev.pointerId); });
-                dom.addEventListener('pointermove', (ev) => { if (!isPointerDown) return; const dy = lastPointerY - ev.clientY; lastPointerY = ev.clientY; window.sampleBoardScrollY += dy; clampScroll(); try{ window.updateSampleText(window._lastSampleText || initialText, 2048, 1024); }catch(e){} });
-                dom.addEventListener('pointerup', (ev) => { isPointerDown = false; try{ dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} });
-            }catch(e){ console.warn('Failed to attach sample board scroll handlers', e); }
-
-            window.updateSampleText = (text, texWidth = 2048, texHeight = 1024) => {
-                if (!window.sampleTextBoard) return;
-                try{ 
-                    // remember last text for scroll redraws
-                    window._lastSampleText = text;
-                    const newTex = this._createTextTexture(text, texWidth, texHeight); const mat = window.sampleTextBoard.material; mat.map = newTex; mat.needsUpdate = true; 
-                }
-                catch(e){ console.error('Failed to update sampleTextBoard text', e); }
-            };
-
-            window.drawInstructionsToBoard = async (instructions, texWidth = 2048, texHeight = 1024) => {
-                if (!window.sampleTextBoard) return;
-                const yOffset = (window.sampleBoardScrollY && Number(window.sampleBoardScrollY)) ? Number(window.sampleBoardScrollY) : 0;
-                const canvas = document.createElement('canvas'); canvas.width = texWidth; canvas.height = texHeight; const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,texWidth,texHeight);
-                for (const ins of instructions){
-                    if (ins.type === 'text'){
-                        ctx.fillStyle = ins.color || '#fff'; ctx.font = ins.font || `${Math.floor(texHeight * 0.04)}px sans-serif`; ctx.textAlign = ins.align || 'left'; ctx.textBaseline = ins.baseline || 'top'; ctx.fillText(ins.text, ins.x || 0, (ins.y || 0) - yOffset);
-                    }
-
-                    else if (ins.type === 'image' && ins.url){
-                        try{ const img = await new Promise((res, rej)=>{ const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = ()=> res(i); i.onerror = rej; i.src = ins.url; }); const w = ins.width || img.width; const h = ins.height || img.height; ctx.drawImage(img, ins.x || 0, (ins.y || 0) - yOffset, w, h);} catch(e){ console.error('Failed to load instruction image', e); }
-                    } else if (ins.type === 'line'){ ctx.strokeStyle = ins.color || '#fff'; ctx.lineWidth = ins.width || 2; ctx.beginPath(); ctx.moveTo(ins.from[0], ins.from[1] - yOffset); ctx.lineTo(ins.to[0], ins.to[1] - yOffset); ctx.stroke(); }
-                }
-                const tex = new THREE.CanvasTexture(canvas); tex.encoding = THREE.sRGBEncoding; tex.needsUpdate = true; window.sampleTextBoard.material.map = tex; window.sampleTextBoard.material.needsUpdate = true; console.log('Drew instructions to board');
-            };
-
-
-
-            window.setSampleBoardOffset = (x = 5, y = 5, z = 0) => { if (!window.sampleTextBoard) return; const pos = new THREE.Vector3(); object.getWorldPosition(pos); pos.add(new THREE.Vector3(x, y, z)); window.sampleTextBoard.position.copy(pos); };
-
-            console.log('Created sampleTextBoard in scene (use updateSampleText / setSampleBoardOffset to tweak)');
+                window.updateSampleText = (...args) => { try{ return this.sampleBoard.updateText(...args); } catch(e){} };
+                window.drawInstructionsToBoard = (...args) => { try{ return this.sampleBoard.drawInstructions(...args); } catch(e){} };
+                window.setSampleBoardOffset = (...args) => { try{ return this.sampleBoard.setOffset(...args); } catch(e){} };
+            }catch(e){ /* ignore */ }
+            console.log('Created sampleTextBoard via SampleBoard class (use updateSampleText / setSampleBoardOffset to tweak)');
         } catch (e){ console.error('Failed to create sample text board', e); }
     }
 
