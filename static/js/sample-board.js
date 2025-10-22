@@ -72,6 +72,39 @@ export default class SampleBoard {
     return { canvas, contentHeight: y, canvasHeight: height };
   }
 
+  // Compute a desired height for a LaTeX element based on content heuristics.
+  // Rules (applied as multiplicative increases on a base height):
+  // - fraction ("/" or "\\dfrac" / "\\frac" syntax) => +50%
+  // - integral ("\\int") => +10%
+  // - script (superscript/subscript: "^" or "_" with braces or direct) => +5%
+  // - root (\\sqrt or \\root) => +5%
+  // If el.height is explicitly provided, use it as the base before adjustments.
+  _computeLatexHeight(el, texHeight){
+    const base = (typeof el.height === 'number') ? Math.max(8, Math.floor(el.height)) : Math.floor(texHeight * 0.15);
+    const s = String(el.latex || '');
+    let factor = 1.0;
+
+    // Fraction detection: explicit \frac or \dfrac or slash with digits/variables either side
+    const fracRegex = /\\d?frac\s*\{|\\frac\s*\{|\b\d+\s*\/\s*\d+|\w\s*\/\s*\w/;
+    if (fracRegex.test(s)) factor += 0.85; // +85%
+
+    // Integral detection: \int
+    const intRegex = /\\int\b/;
+    if (intRegex.test(s)) factor += 0.10; // +10%
+
+  // Script detection: superscript markers (^)
+  const scriptRegex = /\^\s*(?:\{[^}]+\}|[A-Za-z0-9])/;
+    if (scriptRegex.test(s)) factor += 0.05; // +5%
+
+    // Root detection: \sqrt or \root
+    const rootRegex = /\\sqrt\b|\\root\b/;
+    if (rootRegex.test(s)) factor += 0.05; // +5%
+
+    // Clamp final height to reasonable bounds
+    const finalH = Math.max(8, Math.min(2048, Math.round(base * factor)));
+    return finalH;
+  }
+
   // Compose a sequence of elements (text or latex) into one combined texture.
   // elements: [{ type: 'text', text: '...', x?:number }, { type: 'latex', latex: '...', width?:number, height?:number, x?:number }, ...]
   // Order of elements is preserved. Each element is rendered to its own canvas then stacked vertically with small spacing.
@@ -99,8 +132,8 @@ export default class SampleBoard {
         elementCanvases.push({ canvas: outCanvas, x: (typeof el.x === 'number') ? el.x : 0, height: outCanvas.height });
       } else if (el.type === 'latex'){
         const latex = String(el.latex || '');
-        // choose render height for latex element
-        const desiredH = (typeof el.height === 'number') ? el.height : Math.floor(texHeight * 0.15);
+        // choose render height for latex element (may be adjusted based on content)
+        const desiredH = this._computeLatexHeight(el, texHeight);
         const desiredW = (typeof el.width === 'number') ? el.width : texWidth;
         try{
           const opts = {};

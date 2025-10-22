@@ -98,60 +98,38 @@ class MathJaxClient {
     const makeBold = (opts && typeof opts.bold !== 'undefined') ? !!opts.bold : true;
     const strokeWidth = (opts && typeof opts.strokeWidth !== 'undefined') ? String(opts.strokeWidth) : (makeBold ? '1.2' : '0');
     try{
-      // Operate on a cloned node to avoid mutating MathJax internals
-      const cloned = svg.cloneNode(true);
-      // Walk all elements and set fill/stroke to our chosen color.
-      const all = cloned.querySelectorAll('*');
-      for (const el of all){
-        try{
-          // Remove any external style that could reference fonts or urls
-          el.removeAttribute('style');
-        } catch(e){}
-        try{ el.setAttribute('fill', color); } catch(e){}
-        try{ el.setAttribute('stroke', color); } catch(e){}
-        try{ el.setAttribute('stroke-width', strokeWidth); } catch(e){}
-        try{ el.setAttribute('stroke-linejoin', 'round'); } catch(e){}
-        try{ el.setAttribute('stroke-linecap', 'round'); } catch(e){}
-      }
-      // Also set attributes on the root svg
-      try{ cloned.setAttribute('fill', color); } catch(e){}
-      try{ cloned.setAttribute('stroke', color); } catch(e){}
-      try{ cloned.setAttribute('stroke-width', strokeWidth); } catch(e){}
-      try{ cloned.setAttribute('stroke-linejoin', 'round'); } catch(e){}
-      try{ cloned.setAttribute('stroke-linecap', 'round'); } catch(e){}
-      // Inject a small inline style to normalize internal MathJax element sizes so
-      // subscripts/superscripts and fraction parts render at consistent scale.
-      try{
-        const style = document.createElement('style');
-        style.textContent = `
-          /* User requested specific scaling for math parts */
-          /* Scripts (sub/superscripts) slightly larger */
-          mjx-script, mjx-sup, mjx-sub { font-size: 110% !important; line-height: 1 !important; }
+        // Operate on a cloned node to avoid mutating MathJax internals
+        const cloned = svg.cloneNode(true);
+        // Walk all elements and set fill/stroke to our chosen color.
+        const all = cloned.querySelectorAll('*');
+        for (const el of all){
+            try{
+            // Remove any external style that could reference fonts or urls
+                el.removeAttribute('style'); 
+            } catch(e){}
+                try{ el.setAttribute('fill', color); } catch(e){}
+                try{ el.setAttribute('stroke', color); } catch(e){}
+                try{ el.setAttribute('stroke-width', strokeWidth); } catch(e){}
+                try{ el.setAttribute('stroke-linejoin', 'round'); } catch(e){}
+                try{ el.setAttribute('stroke-linecap', 'round'); } catch(e){}
+            }
+                // Also set attributes on the root svg
+                try{ cloned.setAttribute('fill', color); } catch(e){}
+                try{ cloned.setAttribute('stroke', color); } catch(e){}
+                try{ cloned.setAttribute('stroke-width', strokeWidth); } catch(e){}
+                try{ cloned.setAttribute('stroke-linejoin', 'round'); } catch(e){}
+                try{ cloned.setAttribute('stroke-linecap', 'round'); } catch(e){}
 
-          /* Fractions (numerator/denominator) substantially larger for legibility */
-          mjx-numerator, mjx-denominator { font-size: 170% !important; display: inline-block !important; line-height: 1 !important; }
-
-          /* Square root symbol and contents slightly larger */
-          mjx-root { font-size: 105% !important; }
-
-          /* If there is an exponent inside the square root, make it a bit larger */
-          mjx-root mjx-sup, mjx-root mjx-sub { font-size: 115% !important; }
-        `;
-        // prepend the style node into the cloned svg if possible
-        try{ cloned.insertBefore(style, cloned.firstChild); } catch(e){ cloned.appendChild(style); }
-      } catch(e){}
-      // Serialize the modified SVG
-      var svgString = new XMLSerializer().serializeToString(cloned);
-    } catch(e){
-      // Fallback to original serialization if anything goes wrong
-      var svgString = new XMLSerializer().serializeToString(svg);
+            // Serialize the modified SVG
+            var svgString = new XMLSerializer().serializeToString(cloned);
+        } catch(e){
+            // Fallback to original serialization if anything goes wrong
+            var svgString = new XMLSerializer().serializeToString(svg);
+        }
+    const img = await MathJaxClient.svgStringToImage(svgString);
+    // draw into texture sized to width/height (optionally scale preserving aspect)
+    return MathJaxClient.imageToCanvasTexture(img, width, height, opts);
     }
-  const img = await MathJaxClient.svgStringToImage(svgString);
-  // draw into texture sized to width/height (optionally scale preserving aspect)
-  return MathJaxClient.imageToCanvasTexture(img, width, height, opts);
-  }
-
-  
 }
 
 const LatexClient = MathJaxClient;
