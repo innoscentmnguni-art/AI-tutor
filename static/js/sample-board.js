@@ -67,9 +67,11 @@ export default class SampleBoard {
     const fracRegex = /\\d?frac\s*\{|\\frac\s*\{|\b\d+\s*\/\s*\d+|\w\s*\/\s*\w/;
     if (fracRegex.test(s)) factor += 0.85; // +85%
 
-    // Integral detection: \int
-    const intRegex = /\\int\b/;
-    if (intRegex.test(s)) factor += 0.10; // +10%
+  // Integral detection: match common LaTeX integral commands (\int, \iint, \iiint, \oint, \oiint)
+  // and the Unicode integral symbol (∫). We don't require a word boundary because integrals often
+  // have subscripts/superscripts (e.g. \int_0^1).
+  const intRegex = /(?:\\int|\\iint|\\iiint|\\oint|\\oiint|∫)/;
+  if (intRegex.test(s)) factor += 1.10; // +110%
 
   // Script detection: superscript markers (^)
   const scriptRegex = /\^\s*(?:\{[^}]+\}|[A-Za-z0-9])/;
@@ -148,7 +150,7 @@ export default class SampleBoard {
       }
     }
 
-    // compute combined height
+  // compute combined height
     let totalHeight = 0;
     for (const ec of elementCanvases) totalHeight += ec.height + spacing;
     if (totalHeight <= 0) totalHeight = texHeight;
@@ -175,6 +177,24 @@ export default class SampleBoard {
     this._sampleBoardContentHeight = totalHeight;
     this._sampleBoardCanvasHeight = texHeight;
     console.log('updateCombined applied', { elements: elements.length, stackedHeight: stackedCanvas.height, viewY });
+    // cache the stacked canvas so future scroll redraws can be fast (no re-layout/re-render)
+    try { this._stackedCanvas = stackedCanvas; this._stackedCanvasWidth = texWidth; this._stackedCanvasHeight = totalHeight; } catch(e) { this._stackedCanvas = null; }
+  }
+
+  // Render viewport from a cached stacked canvas (fast path for scroll-only updates)
+  _renderViewportFromStackedCanvas(){
+    try{
+      if (!this._stackedCanvas || !this._sampleTextBoard) return;
+      const texWidth = this._stackedCanvasWidth || this.texWidth;
+      const texHeight = this.texHeight;
+      const maxViewY = Math.max(0, this._stackedCanvasHeight - texHeight);
+      const viewY = Math.max(0, Math.min(this._sampleBoardScrollY || 0, maxViewY));
+      const viewportCanvas = document.createElement('canvas'); viewportCanvas.width = texWidth; viewportCanvas.height = texHeight;
+      const vctx = viewportCanvas.getContext('2d'); vctx.clearRect(0,0,viewportCanvas.width,viewportCanvas.height);
+      vctx.drawImage(this._stackedCanvas, 0, viewY, texWidth, texHeight, 0, 0, texWidth, texHeight);
+      const tex = this._canvasToTexture(viewportCanvas);
+      const mat = this._sampleTextBoard.material; if (mat.map) this._safeDisposeTexture(mat.map); mat.map = tex; mat.needsUpdate = true;
+    } catch(e){ console.warn('Fast viewport render failed, falling back to full redraw', e); this._stackedCanvas = null; this._redrawFromCache(); }
   }
 
   _canvasToTexture(canvas){ return canvasToTexture(canvas); }
@@ -199,20 +219,28 @@ export default class SampleBoard {
       };
 
       const wheelHandler = (ev) => {
-        const delta = ev.deltaY; this._sampleBoardScrollY += delta * 0.6; clampScroll(); this._scheduleRedraw(); ev.preventDefault();
+        // normalize delta across devices
+        let delta = ev.deltaY || 0;
+        if (ev.deltaMode === 1) delta *= 16; // line -> pixels approx
+        else if (ev.deltaMode === 2) delta *= 100; // page -> large
+        this._sampleBoardScrollY += delta * 0.6; clampScroll();
+        this._scheduleRedraw(); ev.preventDefault();
       };
 
       const down = (ev) => { isPointerDown = true; lastPointerY = ev.clientY; dom.setPointerCapture && dom.setPointerCapture(ev.pointerId); };
       const move = (ev) => { if (!isPointerDown) return; const dy = lastPointerY - ev.clientY; lastPointerY = ev.clientY; this._sampleBoardScrollY += dy; clampScroll(); this._scheduleRedraw(); };
-      const up = (ev) => { isPointerDown = false; try{ dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
+  const up = (ev) => { isPointerDown = false; try{ dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
+  const cancel = (ev) => { isPointerDown = false; try{ dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
 
       dom.addEventListener('wheel', wheelHandler, { passive: false });
       dom.addEventListener('pointerdown', down); dom.addEventListener('pointermove', move); dom.addEventListener('pointerup', up);
+      dom.addEventListener('pointercancel', cancel);
 
       this._listeners.push({ el: dom, type: 'wheel', fn: wheelHandler, opts: { passive: false } });
       this._listeners.push({ el: dom, type: 'pointerdown', fn: down });
       this._listeners.push({ el: dom, type: 'pointermove', fn: move });
       this._listeners.push({ el: dom, type: 'pointerup', fn: up });
+      this._listeners.push({ el: dom, type: 'pointercancel', fn: cancel });
     } catch(e){ console.warn('Failed to attach sample board handlers', e); }
   }
 
@@ -228,8 +256,13 @@ export default class SampleBoard {
         // re-run drawInstructions with cached instructions
         this.drawInstructions(this._lastInstructions, this.texWidth, this.texHeight);
       } else if (this._mode === 'combined' && this._lastCombinedElements){
-        // re-run combined render with cached elements (preserves scroll)
-        this.updateCombined(this._lastCombinedElements, this.texWidth, this.texHeight);
+        // Fast path: if we have a cached stacked canvas, render the viewport only (avoids re-rendering latex/images)
+        if (this._stackedCanvas) {
+          this._renderViewportFromStackedCanvas();
+        } else {
+          // fallback to full re-render when no cached stacked canvas exists
+          this.updateCombined(this._lastCombinedElements, this.texWidth, this.texHeight);
+        }
       } else {
         // text mode
         this.updateText(this._lastSampleText, this.texWidth, this.texHeight, { useLatex: !!this._lastUseLatex, inlineCss: this._lastInlineCss });
