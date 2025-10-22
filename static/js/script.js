@@ -239,6 +239,10 @@ class SpeechRecognitionManager {
         this.silenceStart = null;
         this.threshold = 0.01;
         this.silenceMs = 1000;
+        // When true, any captured audio or pending transcriptions will be discarded
+        this._blockedForPlayback = false;
+        // remember desired keepAlive across temporary blocks
+        this._prevKeepAlive = false;
     }
 
     async start() {
@@ -277,6 +281,30 @@ class SpeechRecognitionManager {
                 try { this.recorderNode.onaudioprocess = null; } catch(e){}
                 this.recorderNode = null;
             }
+        } catch (e) { console.error(e); }
+    }
+
+    // Temporarily block any captured audio from being sent for transcription.
+    // Useful to suppress speech captured while TTS/playback is active.
+    blockForPlayback() {
+        try {
+            this._blockedForPlayback = true;
+            // clear any buffered audio we may already have
+            this.buffer = [];
+            // remember and unset keepAlive so we don't automatically resume
+            this._prevKeepAlive = !!this._keepAlive;
+            this._keepAlive = false;
+            this._pauseRecording();
+        } catch (e) { console.error(e); }
+    }
+
+    // Unblock after playback and optionally resume recording if requested.
+    unblockAfterPlayback() {
+        try {
+            this._blockedForPlayback = false;
+            // restore keepAlive to previous state
+            this._keepAlive = !!this._prevKeepAlive;
+            this._prevKeepAlive = false;
         } catch (e) { console.error(e); }
     }
 
@@ -331,6 +359,11 @@ class SpeechRecognitionManager {
         this._pauseRecording();
         this.buffer = [];
         try {
+            // If we are blocked for playback, drop this captured audio instead of sending
+            if (this._blockedForPlayback) {
+                // no-op: discard
+                return;
+            }
             await this._sendForTranscription(wav);
         } catch (e) { console.error('Transcription request failed', e); }
     }
@@ -339,6 +372,10 @@ class SpeechRecognitionManager {
         const fd = new FormData();
         fd.append('file', wavBlob, 'speech.wav');
         try {
+            // If blocked due to ongoing TTS/playback, don't send the transcription
+            if (this._blockedForPlayback) {
+                return;
+            }
             const res = await fetch('/transcribe', { method: 'POST', body: fd });
             if (!res.ok) { console.error('Transcription failed', res.status); return; }
             const data = await res.json();
@@ -493,12 +530,28 @@ class TTSManager {
                     window.updateSampleTextCombined(elems, 2048, 1024);
                 } catch(e) { console.error(e); }
             }
-            // pause recording while avatar speaks to avoid capturing playback
-            try { if (this.sr) { this.sr._pauseRecording(); this.ui.resetMicLevel(); } } catch(e){}
+            // block recording/transcription while avatar speaks to avoid capturing playback
+            const micWasOn = this.micBtn?.getAttribute('aria-pressed') === 'true';
+            try {
+                if (this.sr) {
+                    // ensure UI shows mic level cleared while blocked
+                    this.ui.resetMicLevel();
+                    this.sr.blockForPlayback();
+                }
+            } catch (e) { console.error(e); }
+
             await AudioManager.playWithVisemes(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap);
-            // resume recording if mic still toggled on and keepAlive requested
-            const micStillOn = this.micBtn?.getAttribute('aria-pressed') === 'true';
-            try { if (micStillOn && this.sr && this.sr._keepAlive) this.sr._resumeRecording(); } catch(e){}
+
+            // Unblock and resume recording if the mic is still toggled on
+            try {
+                if (this.sr) {
+                    this.sr.unblockAfterPlayback();
+                    if (micWasOn && this.sr._keepAlive) {
+                        // small delay to let audio devices settle
+                        setTimeout(() => { try { this.sr._resumeRecording(); } catch(e){} }, 200);
+                    }
+                }
+            } catch (e) { console.error(e); }
         } else {
             console.error('Failed to synthesize speech:', data?.error);
         }

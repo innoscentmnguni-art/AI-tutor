@@ -37,14 +37,45 @@ class GazeClient {
         this.toggleBtn.className = 'btn btn-primary';
         this.toggleBtn.style.width = '120px';  // Fixed width for consistency
 
-        // Append toggle button to the wrapper, then wrapper to container
+        // Show/Hide Eye Tracker button — default hidden (user preference)
+        this.showTrackerBtn = document.createElement('button');
+        this.showTrackerBtn.className = 'btn btn-outline-light';
+        this.showTrackerBtn.style.width = '140px';
+        this.showTrackerBtn.textContent = 'Show Eye Tracker';
+
+        // Load persisted preference (default = false -> hide processed view)
+        try {
+            const val = localStorage.getItem('showEyeTracker');
+            this._showEyeTracker = val === 'true';
+        } catch(e){ this._showEyeTracker = false; }
+        this._applyShowTrackerText();
+
+        // Append toggle and show/hide buttons to wrapper, then wrapper to container
         this.controlsWrap.appendChild(this.toggleBtn);
+        this.controlsWrap.appendChild(this.showTrackerBtn);
         this.container.appendChild(this.controlsWrap);
     }
 
     _bindEvents(){
         this.toggleBtn.addEventListener('click', () => this._onToggleClick());
+        this.showTrackerBtn.addEventListener('click', () => {
+            this._showEyeTracker = !this._showEyeTracker;
+            try { localStorage.setItem('showEyeTracker', String(!!this._showEyeTracker)); } catch(e){}
+            this._applyShowTrackerText();
+            // apply visibility immediately
+            if (!this._showEyeTracker) this.hideProcessedImage(); else {
+                // if we have a recent processed frame, make it visible
+                if (this.processedImg && this.processedImg.src) this.processedImg.style.display = 'block';
+            }
+        });
         window.addEventListener('unload', () => this.stop());
+    }
+
+    _applyShowTrackerText(){
+        if (!this.showTrackerBtn) return;
+        this.showTrackerBtn.textContent = this._showEyeTracker ? 'Hide Eye Tracker' : 'Show Eye Tracker';
+        this.showTrackerBtn.classList.toggle('btn-outline-success', !!this._showEyeTracker);
+        this.showTrackerBtn.classList.toggle('btn-outline-light', !this._showEyeTracker);
     }
 
     async _onToggleClick(){
@@ -161,7 +192,9 @@ class GazeClient {
         if (!data) return;
         if (data.processed_frame){
             this.processedImg.src = 'data:image/jpeg;base64,' + data.processed_frame;
-            this.processedImg.style.display = 'block';
+            // only show the processed frame if user opted to show tracker
+            if (this._showEyeTracker) this.processedImg.style.display = 'block';
+            else this.processedImg.style.display = 'none';
         }
         const angleEl = document.getElementById('gaze-angle');
         if (angleEl) angleEl.textContent = data.gaze_angle != null ? `Gaze Angle: ${data.gaze_angle.toFixed(1)}°` : 'Gaze Angle: --';
