@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import LatexClient from './latex-client.js';
+import { createCanvasForText, canvasToTexture, safeDisposeTexture, createTextTexture } from './texture-utils.js';
 
 // SampleBoard: encapsulates a text board mesh, texture lifecycle, scroll handlers, and drawing helpers
 export default class SampleBoard {
@@ -47,29 +48,7 @@ export default class SampleBoard {
 
   // create canvas and return texture and heights
   _createCanvasForText(text, width = 1024, height = 512, yOffset = 0){
-    const canvas = document.createElement('canvas');
-    canvas.width = width; canvas.height = height;
-    const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,width,height);
-    ctx.fillStyle = '#fff';
-  const fontSize = Math.floor(height * 0.08);
-  // use normal (non-bold) Times New Roman for plaintext
-  ctx.font = `${fontSize}px "Times New Roman", Times, serif`;
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    const margin = Math.floor(height * 0.05); const maxWidth = width - (margin * 2);
-    const lineHeight = fontSize * 1.2; const paragraphs = String(text).split('\n');
-    let y = margin;
-    for (const paragraph of paragraphs){
-      const words = paragraph.split(' ');
-      let line = '';
-      for (const word of words){
-        const testLine = line + (line ? ' ' : '') + word;
-        const metrics = ctx.measureText(testLine);
-        if (metrics.width > maxWidth && line){ ctx.fillText(line, margin, y - yOffset); line = word; y += lineHeight; }
-        else { line = testLine; }
-      }
-      if (line){ ctx.fillText(line, margin, y - yOffset); y += lineHeight * 1.5; }
-    }
-    return { canvas, contentHeight: y, canvasHeight: height };
+    return createCanvasForText(text, width, height, yOffset);
   }
 
   // Compute a desired height for a LaTeX element based on content heuristics.
@@ -198,20 +177,15 @@ export default class SampleBoard {
     console.log('updateCombined applied', { elements: elements.length, stackedHeight: stackedCanvas.height, viewY });
   }
 
-  _canvasToTexture(canvas){
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.encoding = THREE.sRGBEncoding;
-    tex.needsUpdate = true;
-    return tex;
-  }
+  _canvasToTexture(canvas){ return canvasToTexture(canvas); }
 
-  _safeDisposeTexture(tex){ try{ if (tex && typeof tex.dispose === 'function') tex.dispose(); } catch(e){} }
+  _safeDisposeTexture(tex){ return safeDisposeTexture(tex); }
 
   _createTextTexture(text, width = 1024, height = 512, yOffset = 0){
-    const { canvas, contentHeight, canvasHeight } = this._createCanvasForText(text, width, height, yOffset);
+    const { texture, contentHeight, canvasHeight } = createTextTexture(text, width, height, yOffset);
     this._sampleBoardContentHeight = contentHeight;
     this._sampleBoardCanvasHeight = canvasHeight;
-    return this._canvasToTexture(canvas);
+    return texture;
   }
 
   _attachInputHandlers(){

@@ -94,9 +94,9 @@ class AudioManager {
             let resolved = false;
 
             const cleanup = () => {
-                if (silenceTimer) clearTimeout(silenceTimer);
-                audio.removeEventListener('ended', onEnded);
-                audio.removeEventListener('play', onPlay);
+                try { if (silenceTimer) clearTimeout(silenceTimer); } catch(e){}
+                try { audio.removeEventListener('ended', onEnded); } catch(e){}
+                try { audio.removeEventListener('play', onPlay); } catch(e){}
             };
 
             const onEnded = () => {
@@ -204,16 +204,20 @@ class SpeechRecognitionManager {
             return false;
         }
 
-        // create audio context if not present
+        // create or reuse audio context
         if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (!this.sourceNode) this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream);
+        if (!this.sourceNode || this.sourceNode.mediaStream !== this.stream) {
+            try { this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream); } catch(e){ console.warn('Failed to create media source', e); }
+        }
 
         // create recorder node if not present
         if (!this.recorderNode) {
-            this.recorderNode = this.audioCtx.createScriptProcessor(4096, 1, 1);
-            this.recorderNode.onaudioprocess = this._onAudio.bind(this);
-            this.sourceNode.connect(this.recorderNode);
-            this.recorderNode.connect(this.audioCtx.destination);
+            try {
+                this.recorderNode = this.audioCtx.createScriptProcessor(4096, 1, 1);
+                this.recorderNode.onaudioprocess = this._onAudio.bind(this);
+                if (this.sourceNode && typeof this.sourceNode.connect === 'function') this.sourceNode.connect(this.recorderNode);
+                try { this.recorderNode.connect(this.audioCtx.destination); } catch(e) { /* some browsers disallow connecting to destination */ }
+            } catch(e) { console.error('Failed to create recorder node', e); }
         }
         return true;
     }
@@ -222,7 +226,7 @@ class SpeechRecognitionManager {
         try {
             if (this.recorderNode) {
                 try { this.recorderNode.disconnect(); } catch(e){}
-                this.recorderNode.onaudioprocess = null;
+                try { this.recorderNode.onaudioprocess = null; } catch(e){}
                 this.recorderNode = null;
             }
         } catch (e) { console.error(e); }
@@ -235,7 +239,7 @@ class SpeechRecognitionManager {
             if (!this.recorderNode) {
                 this.recorderNode = this.audioCtx.createScriptProcessor(4096, 1, 1);
                 this.recorderNode.onaudioprocess = this._onAudio.bind(this);
-                try { this.sourceNode.connect(this.recorderNode); } catch(e){}
+                try { if (this.sourceNode && typeof this.sourceNode.connect === 'function') this.sourceNode.connect(this.recorderNode); } catch(e){}
                 try { this.recorderNode.connect(this.audioCtx.destination); } catch(e){}
             }
         } catch (e) { console.error('Failed to resume recording', e); }
@@ -263,10 +267,10 @@ class SpeechRecognitionManager {
     }
 
     _cleanup() {
-        try { if (this.recorderNode) { this.recorderNode.disconnect(); this.recorderNode.onaudioprocess = null; } } catch(e){}
-        try { if (this.sourceNode) this.sourceNode.disconnect(); } catch(e){}
-        try { if (this.audioCtx) this.audioCtx.close(); } catch(e){}
-        try { if (this.stream) this.stream.getTracks().forEach(t => t.stop()); } catch(e){}
+        try { if (this.recorderNode) { this.recorderNode.disconnect(); try { this.recorderNode.onaudioprocess = null; } catch(e){} this.recorderNode = null; } } catch(e){}
+        try { if (this.sourceNode && typeof this.sourceNode.disconnect === 'function') { this.sourceNode.disconnect(); this.sourceNode = null; } } catch(e){}
+        try { if (this.audioCtx) { this.audioCtx.close(); } } catch(e){}
+        try { if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } } catch(e){}
         try { if (this.onLevel) this.onLevel(0); } catch(e){}
     }
 

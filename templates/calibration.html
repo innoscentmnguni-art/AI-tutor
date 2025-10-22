@@ -83,6 +83,8 @@ class CalibrationManager {
         this.readyButton = document.getElementById('readyButton');
         this.instructions = document.getElementById('calibrationInstructions');
         this.calibrationInterval = null;
+        this._activeIntervals = new Set();
+        this._activeTimeouts = new Set();
         this.videoReady = false;
 
         this.startButton.disabled = true;
@@ -179,9 +181,11 @@ class CalibrationManager {
                     console.error('Calibration error:', error);
                 }
             }, 100);
+            this._activeIntervals.add(interval);
 
             setTimeout(() => {
                 clearInterval(interval);
+                this._activeIntervals.delete(interval);
                 const successRate = successfulFrames / totalFrames;
                 resolve(successRate >= requiredSuccessRate);
             }, duration);
@@ -208,9 +212,11 @@ class CalibrationManager {
                     console.error('Verification error:', error);
                 }
             }, 100);
+            this._activeIntervals.add(interval);
 
             setTimeout(() => {
                 clearInterval(interval);
+                this._activeIntervals.delete(interval);
                 const accuracy = inRangeFrames / totalFrames;
                 resolve(accuracy >= requiredAccuracy);
             }, duration);
@@ -248,6 +254,8 @@ class CalibrationManager {
                     .catch(error => reject(error));
                 };
                 reader.readAsDataURL(blob);
+                // cleanup references after a short delay to allow async ops to finish
+                setTimeout(() => { try { canvas.width = 0; canvas.height = 0; } catch(e){} }, 2000);
             }, 'image/jpeg');
         });
     }
@@ -255,6 +263,20 @@ class CalibrationManager {
 
 document.addEventListener('DOMContentLoaded', function() {
     const calibrationManager = new CalibrationManager();
+    // ensure we stop camera and clear intervals on page unload
+    window.addEventListener('beforeunload', () => {
+        try {
+            // stop camera stream
+            if (calibrationManager.video && calibrationManager.video.srcObject) {
+                const s = calibrationManager.video.srcObject;
+                if (s.getTracks) s.getTracks().forEach(t => t.stop());
+                calibrationManager.video.srcObject = null;
+            }
+            // clear any active intervals/timeouts
+            if (calibrationManager._activeIntervals) calibrationManager._activeIntervals.forEach(i => clearInterval(i));
+            if (calibrationManager._activeTimeouts) calibrationManager._activeTimeouts.forEach(t => clearTimeout(t));
+        } catch(e) { console.warn('Error during unload cleanup', e); }
+    });
 });
 </script>
 {% endblock %}

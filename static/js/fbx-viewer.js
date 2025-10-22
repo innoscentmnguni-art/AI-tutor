@@ -8,6 +8,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { avatarEvents } from './script.js';
 import LatexClient from './latex-client.js';
 import SampleBoard from './sample-board.js';
+import { createCanvasForText, canvasToTexture, safeDisposeTexture, createTextTexture } from './texture-utils.js';
 
 const container = document.getElementById('fbx-container');
 
@@ -114,9 +115,9 @@ class FBXViewer {
 
     _applyTextTextureToMesh(mesh, text){
         try {
-            const sampleTex = this._createTextTexture(text, 1024, 512, 0);
+            const tex = this._createTextTexture(text, 1024, 512, 0);
             const mat = mesh.material && mesh.material.clone ? mesh.material.clone() : new THREE.MeshBasicMaterial();
-            mat.map = sampleTex;
+            mat.map = tex;
             mat.transparent = true;
             mat.side = THREE.DoubleSide;
             mesh.material = mat;
@@ -143,60 +144,22 @@ class FBXViewer {
 
     // Creates a canvas with the rendered text and returns { canvas, contentHeight }
     _createCanvasForText(text, width = 1024, height = 512, yOffset = 0){
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, width, height);
-        ctx.fillStyle = '#fff';
-        const fontSize = Math.floor(height * 0.05);
-        ctx.font = `${fontSize}px "Times New Roman", Times, serif`;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        const margin = Math.floor(height * 0.05);
-        const maxWidth = width - (margin * 2);
-        const lineHeight = fontSize * 1.2;
-        const paragraphs = String(text).split('\n');
-        let y = margin;
-        for (const paragraph of paragraphs){
-            const words = paragraph.split(' ');
-            let line = '';
-            for (const word of words){
-                const testLine = line + (line ? ' ' : '') + word;
-                const metrics = ctx.measureText(testLine);
-                if (metrics.width > maxWidth && line){
-                    ctx.fillText(line, margin, y - yOffset);
-                    line = word;
-                    y += lineHeight;
-                } else {
-                    line = testLine;
-                }
-            }
-            if (line){ ctx.fillText(line, margin, y - yOffset); y += lineHeight * 1.5; }
-        }
-        return { canvas, contentHeight: y, canvasHeight: height };
+        return createCanvasForText(text, width, height, yOffset);
     }
 
     // Convert canvas -> Three.js texture
-    _canvasToTexture(canvas){
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.encoding = THREE.sRGBEncoding;
-        tex.needsUpdate = true;
-        return tex;
-    }
+    _canvasToTexture(canvas){ return canvasToTexture(canvas); }
 
     // Safely dispose a texture if possible
-    _safeDisposeTexture(tex){
-        try{ if (tex && typeof tex.dispose === 'function') tex.dispose(); } catch(e){ /* ignore */ }
-    }
+    _safeDisposeTexture(tex){ return safeDisposeTexture(tex); }
 
     // Wrapper to create a texture from text and manage computed heights
     _createTextTexture(text, width = 1024, height = 512, yOffset = 0){
-        const { canvas, contentHeight, canvasHeight } = this._createCanvasForText(text, width, height, yOffset);
+        const { texture, contentHeight, canvasHeight } = createTextTexture(text, width, height, yOffset);
         // update instance scroll bounds
         this._sampleBoardContentHeight = contentHeight;
         this._sampleBoardCanvasHeight = canvasHeight;
-        return this._canvasToTexture(canvas);
+        return texture;
     }
 
     _onClassroomLoaded(classroomObj){

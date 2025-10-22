@@ -128,7 +128,7 @@ Additional persona rules:
 
 def text_to_speech(text):
     speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
-    speech_config.speech_synthesis_voice_name = "en-GB-SoniaNeural"
+    speech_config.speech_synthesis_voice_name = "en-GB-LibbyNeural"
     filename = os.path.join(tempfile.gettempdir(), f"speech_{uuid.uuid4()}.wav")
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filename)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
