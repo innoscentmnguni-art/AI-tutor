@@ -50,16 +50,18 @@ class MathJaxClient {
     const imgW = (img.naturalWidth || img.width);
     const imgH = (img.naturalHeight || img.height);
     if (imgW > 0 && imgH > 0){
-      const targetFraction = 0.48;
-      const desiredHeight = Math.min(Math.floor(canvas.height * targetFraction), canvas.height - 8);
-      const scale = desiredHeight / imgH;
-      const drawW = Math.min(Math.floor(imgW * scale), canvas.width - 8);
-      const drawH = Math.min(Math.floor(imgH * scale), canvas.height - 8);
-      const dx = Math.floor((canvas.width - drawW) / 2);
-      const dy = Math.floor((canvas.height - drawH) / 2);
-      // fill transparent background (expected) then draw centered scaled image
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
+        const targetFraction = 0.48;
+        const desiredHeight = Math.min(Math.floor(canvas.height * targetFraction), canvas.height - 8);
+        const scale = desiredHeight / imgH;
+        const drawW = Math.min(Math.floor(imgW * scale), canvas.width - 8);
+        const drawH = Math.min(Math.floor(imgH * scale), canvas.height - 8);
+        // left-align the rendered SVG with a small left margin (keep vertical centering)
+        const leftMargin = (typeof opts.leftMargin === 'number') ? Math.max(0, Math.floor(opts.leftMargin)) : 4;
+        const dx = leftMargin;
+        const dy = Math.floor((canvas.height - drawH) / 2);
+        // fill transparent background (expected) then draw left-aligned scaled image
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img, 0, 0, imgW, imgH, dx, dy, drawW, drawH);
     } else {
       // fallback: stretch if we don't have intrinsic size
       ctx.drawImage(img, 0, 0, width, height);
