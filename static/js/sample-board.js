@@ -29,6 +29,8 @@ export default class SampleBoard {
 
         this._createMesh();
         this._attachInputHandlers();
+    // Expose instance for debugging and programmatic control
+    try{ if (typeof window !== 'undefined') window.sampleBoard = this; } catch(e){}
     }
 
     _createMesh(){
@@ -211,36 +213,55 @@ export default class SampleBoard {
   _attachInputHandlers(){
     try{
       const dom = this.rendererDom;
+      const parent = dom && dom.parentElement ? dom.parentElement : null;
+      const targets = [dom, parent].filter(Boolean);
+
       let isPointerDown = false; let lastPointerY = 0;
-      const clampScroll = () => {
+
+      // Move clamp logic to a method closure so other methods can use it too
+      const clampScrollLocal = () => {
         const maxScroll = Math.max(0, (this._sampleBoardContentHeight || 0) - (this._sampleBoardCanvasHeight || 1));
         if (this._sampleBoardScrollY < 0) this._sampleBoardScrollY = 0;
         if (this._sampleBoardScrollY > maxScroll) this._sampleBoardScrollY = maxScroll;
       };
 
       const wheelHandler = (ev) => {
-        // normalize delta across devices
-        let delta = ev.deltaY || 0;
-        if (ev.deltaMode === 1) delta *= 16; // line -> pixels approx
-        else if (ev.deltaMode === 2) delta *= 100; // page -> large
-        this._sampleBoardScrollY += delta * 0.6; clampScroll();
-        this._scheduleRedraw(); ev.preventDefault();
+        try{
+          // normalize delta across devices
+          let delta = ev.deltaY || 0;
+          if (ev.deltaMode === 1) delta *= 16; // line -> pixels approx
+          else if (ev.deltaMode === 2) delta *= 100; // page -> large
+          this._sampleBoardScrollY += delta * 0.6; clampScrollLocal();
+          this._scheduleRedraw();
+          if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+        }catch(e){ console.warn('wheelHandler error', e); }
       };
 
-      const down = (ev) => { isPointerDown = true; lastPointerY = ev.clientY; dom.setPointerCapture && dom.setPointerCapture(ev.pointerId); };
-      const move = (ev) => { if (!isPointerDown) return; const dy = lastPointerY - ev.clientY; lastPointerY = ev.clientY; this._sampleBoardScrollY += dy; clampScroll(); this._scheduleRedraw(); };
-  const up = (ev) => { isPointerDown = false; try{ dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
-  const cancel = (ev) => { isPointerDown = false; try{ dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
+      const down = (ev) => { isPointerDown = true; lastPointerY = (ev.clientY || ev.pageY || (ev.touches && ev.touches[0] && ev.touches[0].clientY) || 0); try{ ev.pointerId && dom.setPointerCapture && dom.setPointerCapture(ev.pointerId); }catch(e){} };
+      const move = (ev) => { try{ if (!isPointerDown) return; const curY = (ev.clientY || ev.pageY || (ev.touches && ev.touches[0] && ev.touches[0].clientY) || 0); const dy = lastPointerY - curY; lastPointerY = curY; this._sampleBoardScrollY += dy; clampScrollLocal(); this._scheduleRedraw(); }catch(e){} };
+      const up = (ev) => { isPointerDown = false; try{ ev.pointerId && dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
+      const cancel = (ev) => { isPointerDown = false; try{ ev.pointerId && dom.releasePointerCapture && dom.releasePointerCapture(ev.pointerId); }catch(e){} };
 
-      dom.addEventListener('wheel', wheelHandler, { passive: false });
-      dom.addEventListener('pointerdown', down); dom.addEventListener('pointermove', move); dom.addEventListener('pointerup', up);
-      dom.addEventListener('pointercancel', cancel);
+      // Attach listeners to both the renderer DOM and its parent (some browsers route wheel/pointer to parent)
+      for (const el of targets){
+        try{ el.addEventListener('wheel', wheelHandler, { passive: false }); }catch(e){ el.addEventListener('wheel', wheelHandler); }
+        el.addEventListener('pointerdown', down);
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', cancel);
 
-      this._listeners.push({ el: dom, type: 'wheel', fn: wheelHandler, opts: { passive: false } });
-      this._listeners.push({ el: dom, type: 'pointerdown', fn: down });
-      this._listeners.push({ el: dom, type: 'pointermove', fn: move });
-      this._listeners.push({ el: dom, type: 'pointerup', fn: up });
-      this._listeners.push({ el: dom, type: 'pointercancel', fn: cancel });
+        this._listeners.push({ el: el, type: 'wheel', fn: wheelHandler, opts: { passive: false } });
+        this._listeners.push({ el: el, type: 'pointerdown', fn: down });
+        this._listeners.push({ el: el, type: 'pointermove', fn: move });
+        this._listeners.push({ el: el, type: 'pointerup', fn: up });
+        this._listeners.push({ el: el, type: 'pointercancel', fn: cancel });
+      }
+
+      // public scroll helpers for debugging and programmatic control
+      this._clampScroll = clampScrollLocal;
+      this.scrollBy = (dy) => { this._sampleBoardScrollY += Number(dy || 0); this._clampScroll(); this._scheduleRedraw(); };
+      this.scrollTo = (y) => { this._sampleBoardScrollY = Number(y || 0); this._clampScroll(); this._scheduleRedraw(); };
+      try{ if (typeof window !== 'undefined'){ window.scrollSampleBoardBy = (dy)=> { try{ this.scrollBy(dy); }catch(e){} }; window.scrollSampleBoardTo = (y)=> { try{ this.scrollTo(y); }catch(e){} }; } }catch(e){}
     } catch(e){ console.warn('Failed to attach sample board handlers', e); }
   }
 
@@ -321,3 +342,33 @@ export default class SampleBoard {
     } catch(e){ console.warn('Error disposing sample board', e); }
   }
 }
+
+// Global helper: forward wheel events to the sample board when pointer is over the board area.
+try{
+  if (typeof window !== 'undefined'){
+    window.addEventListener('wheel', (ev) => {
+      try{
+        const sb = window.sampleBoard;
+        if (!sb || !sb._sampleTextBoard || !sb.camera || !sb.rendererDom) return;
+        // approximate hit test: project board center to screen and compute distance
+        const rect = sb.rendererDom.getBoundingClientRect();
+        const pos = new THREE.Vector3(); sb._sampleTextBoard.getWorldPosition(pos);
+        const proj = pos.clone().project(sb.camera);
+        const sx = (proj.x * 0.5 + 0.5) * rect.width + rect.left;
+        const sy = (-proj.y * 0.5 + 0.5) * rect.height + rect.top;
+        const dx = ev.clientX - sx; const dy = ev.clientY - sy;
+        const distance = Math.sqrt(dx*dx + dy*dy);
+        // if pointer is within ~200px of board center, forward it (tunable)
+        if (distance < 300) {
+          // normalize delta similar to wheelHandler
+          let delta = ev.deltaY || 0;
+          if (ev.deltaMode === 1) delta *= 16; else if (ev.deltaMode === 2) delta *= 100;
+          if (sb && typeof sb.scrollBy === 'function') {
+            sb.scrollBy(delta * 0.6);
+            ev.preventDefault && ev.preventDefault();
+          }
+        }
+      }catch(e){}
+    }, { passive: false });
+  }
+}catch(e){}

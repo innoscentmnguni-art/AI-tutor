@@ -74,7 +74,7 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 # System prompt for the tutor persona — concise, friendly, and student-focused.
 # The model should keep answers short, conversational, and aim to teach clearly.
 SYSTEM_PROMPT = """
-You are an AI tutor named Nova. For every response you must produce exactly two parts, in this order, and nothing else:
+You are an AI tutor named Eva. For every response you must produce exactly two parts, in this order, and nothing else:
 
 1) A single BOARD[...] block that contains all board content to display. The BOARD block must appear once and only once.
     - Put everything that should appear on the visual board inside BOARD[ ... ].
@@ -85,7 +85,9 @@ You are an AI tutor named Nova. For every response you must produce exactly two 
     - If there is no board content, include an empty BOARD[] (the token must still appear).
 
 2) A single SPEAK: block that contains the spoken/verbally-delivered text. SPEAK: must appear once and only once, immediately after the BOARD[...] block.
-    - The SPEAK: text should be 1-3 concise, student-friendly sentences explaining or referring to the board content.
+    - The SPEAK: text should be concise and student-friendly. For short board content (one or two lines) prefer 1-3 short sentences that summarize or clarify the board.
+    - If the BOARD contains a multi-step derivation or a sequence of numbered/line-by-line steps (three or more lines or multiple display equations), the SPEAK: block must provide a brief plain-language explanation for each major step: one short sentence per line/equation. Keep each sentence simple and focused (avoid introducing new notation).
+    - Do not stop SPEAK: until all major steps have been explained. (This is the only exception to the keep responses short and concise rule.)
     - Do not include LaTeX, math symbols, or notation in SPEAK: — describe math in plain language (e.g., 'one half', 'x squared', 'plus', 'minus').
     - When a single-letter identifier (like A, a, x, y) appears as a mathematical symbol in SPEAK:, surround it with hyphens to make it distinct from ordinary words. Example: "she is an -A- student" vs "it's a good day".
 
@@ -154,9 +156,33 @@ def learn():
 
 def generate_response(prompt):
     try:
+        # Build conversation context from session history (if present).
+        # Keep up to the last 10 messages (approx. 5 turns) and truncate each message to avoid large cookies.
+        history = session.get('chat_history', []) if session is not None else []
+        def _truncate(s, limit=1500):
+            s = str(s)
+            return s if len(s) <= limit else s[:limit] + '...'
+
+        history_text = ''
+        if history:
+            # present history in chronological order
+            parts = []
+            for m in history:
+                role = m.get('role', 'user')
+                text = _truncate(m.get('text', ''), 1200)
+                if role == 'assistant':
+                    parts.append('Assistant: ' + text)
+                else:
+                    parts.append('User: ' + text)
+            history_text = '\n\n'.join(parts)
+
         # Prepend system prompt to guide model behavior. Gemini client expects text content,
-        # so send a single concatenated string rather than a custom dict.
-        combined_prompt = SYSTEM_PROMPT + "\n\nUser: " + str(prompt)
+        # so send a single concatenated string. Include recent history before the new user prompt.
+        combined_prompt = SYSTEM_PROMPT
+        if history_text:
+            combined_prompt += "\n\nConversation history (most recent first):\n" + history_text
+        combined_prompt += "\n\nUser: " + str(prompt)
+
         response = model.generate_content(combined_prompt)
         if response and hasattr(response, 'text'):
             return response.text
@@ -200,6 +226,22 @@ def synthesize():
             'visemes': visemes,
             'board_text': board_text  # Send the board text to display
         }
+        # Append to session chat history (simple memory). Keep last 10 messages (approx 5 turns).
+        try:
+            if session is not None:
+                hist = session.get('chat_history', [])
+                # append user then assistant (truncate each to avoid giant sessions)
+                def _t(s, lim=1200):
+                    s = str(s)
+                    return s if len(s) <= lim else s[:lim] + '...'
+                hist.append({'role': 'user', 'text': _t(user_input)})
+                hist.append({'role': 'assistant', 'text': _t(ai_response)})
+                # keep only last 10 messages
+                if len(hist) > 10:
+                    hist = hist[-10:]
+                session['chat_history'] = hist
+        except Exception:
+            pass
         return jsonify(resp)
     else:
         return jsonify({'error': 'Failed to synthesize speech'}), 500
@@ -209,7 +251,7 @@ def synthesize():
 def greeting():
     # Updated greeting: explain scrollable board
     greet_spoken = (
-        "Hello! My name is Nova, your digital AI tutor. Next to me is a scrollable board. "
+        "Hello! My name is Eva, your digital AI tutor. Next to me is a scrollable board. "
         "This board will be used for notes and equations as we learn together. "
         "If the content is too large to fit, you can hover your mouse over the board and scroll to see everything. "
         "What would you like to learn today?"

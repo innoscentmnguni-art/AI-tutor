@@ -47,6 +47,50 @@ function parseBoardTextToElements(boardText){
     return merged;
 }
 
+// Fallback: if parsing yields a single element but the original text contains multiple
+// lines or multiple display math blocks, split into line-based elements to ensure
+// updateCombined receives separate elements (helps scrolling and stacking).
+function normalizeBoardElements(boardText){
+    const elems = parseBoardTextToElements(boardText);
+    if (Array.isArray(elems) && elems.length > 1) return elems;
+    const s = String(boardText || '').trim();
+    // Try to split globally on display math $$...$$ first
+    const parts = [];
+    let last = 0;
+    const displayRegex = /\$\$[\s\S]*?\$\$/g;
+    let m;
+    while ((m = displayRegex.exec(s)) !== null){
+        if (m.index > last){
+            parts.push(s.slice(last, m.index));
+        }
+        parts.push(m[0]);
+        last = displayRegex.lastIndex;
+    }
+    if (last < s.length) parts.push(s.slice(last));
+    // If we only got one big part, try splitting on newlines
+    const candidates = parts.length > 1 ? parts : s.split(/\r?\n/);
+    const out = [];
+    for (const part of candidates){
+        const p = (part || '').trim(); if (!p) continue;
+        if (p.startsWith('$$') && p.endsWith('$$')){
+            out.push({ type: 'latex', latex: p.slice(2,-2).trim(), display: true });
+            continue;
+        }
+        // Now split inline math and plain text within the part
+        const inlineRegex = /(\$[^\$\n][^\$]*?\$)/g;
+        let lastInline = 0; let im;
+        while ((im = inlineRegex.exec(p)) !== null){
+            if (im.index > lastInline){
+                const plain = p.slice(lastInline, im.index).trim(); if (plain) out.push({ type: 'text', text: plain });
+            }
+            const mtext = im[0]; out.push({ type: 'latex', latex: mtext.slice(1,-1).trim(), display: false });
+            lastInline = inlineRegex.lastIndex;
+        }
+        if (lastInline < p.length){ const tail = p.slice(lastInline).trim(); if (tail) out.push({ type: 'text', text: tail }); }
+    }
+    return out.length ? out : elems;
+}
+
 /*
  * Refactored script.js into small focused classes. Each class has a single responsibility
  * and the overall behavior is preserved: theme toggling, TTS request -> audio playback
@@ -411,7 +455,8 @@ class TTSManager {
             const data = await res.json();
             if (data.board_text && window.updateSampleTextCombined) {
                 try {
-                    const elems = parseBoardTextToElements(data.board_text);
+                    let elems = normalizeBoardElements(data.board_text);
+                    console.log('Applying board elements', elems.length);
                     window.updateSampleTextCombined(elems, 2048, 1024);
                 } catch(e) { console.error(e); }
             }
@@ -443,7 +488,8 @@ class TTSManager {
         if (data.success && data.audio_url) {
             if (data.board_text && window.updateSampleTextCombined) {
                 try {
-                    const elems = parseBoardTextToElements(data.board_text);
+                    let elems = normalizeBoardElements(data.board_text);
+                    console.log('Applying board elements', elems.length);
                     window.updateSampleTextCombined(elems, 2048, 1024);
                 } catch(e) { console.error(e); }
             }
