@@ -20,7 +20,8 @@ class FBXViewer {
         this._initScene();
         this.clock = new THREE.Clock();
         this.mixer = null;
-        this.idleAction = null;
+        this.actions = {}; // { idle: AnimationAction, thinking: AnimationAction, talking: AnimationAction }
+        this._currentAction = null; // name of current action
         this.fbxLoader = new FBXLoader();
         // gaze/engagement state used to drive apple behavior
         this._gazeEngaged = true;
@@ -106,11 +107,14 @@ class FBXViewer {
     _loadAssets(){
         const classroomPath = '/static/fbx/ClassRoom.fbx';
         const modelPath = '/static/fbx/yonela.fbx';
-        const animPath = '/static/fbx/Idle.fbx';
+        // animation files: idle is default, thinking overrides while active
+        this.animPaths = {
+            idle: '/static/fbx/Idle.fbx',
+            thinking: '/static/fbx/Thinking.fbx'
+        };
 
         this.fbxLoader.load(classroomPath, (classroomObj) => this._onClassroomLoaded(classroomObj), undefined, (err) => console.error('Error loading classroom FBX:', err));
         this.modelPath = modelPath;
-        this.animPath = animPath;
     }
 
     _applyTextTextureToMesh(mesh, text){
@@ -188,7 +192,10 @@ class FBXViewer {
     this._createSampleBoard(object);
         // create apple sprite attached to avatar head
         try { this._createAppleSprite(object); } catch(e){ console.error('Failed to create apple sprite', e); }
-        this.fbxLoader.load(this.animPath, (anim)=> this._onAnimLoaded(anim, object), undefined, (err) => console.error('Failed to load idle animation:', err));
+        // Load animations (idle first, then thinking in parallel)
+        this.fbxLoader.load(this.animPaths.idle, (anim)=> this._onAnimLoaded(anim, object, 'idle'), undefined, (err) => console.error('Failed to load idle animation:', err));
+        // load thinking but don't block on it
+        this.fbxLoader.load(this.animPaths.thinking, (anim)=> this._onAnimLoaded(anim, object, 'thinking'), undefined, (err) => {/* console.warn('Thinking animation not found', err) */});
     }
 
     _createAppleSprite(object){
@@ -333,14 +340,47 @@ class FBXViewer {
         } catch (e){ console.error('Failed to create sample text board', e); }
     }
 
-    _onAnimLoaded(anim, object){
-        this.mixer = new THREE.AnimationMixer(object);
-        const idleClip = anim.animations && anim.animations.length ? anim.animations[0] : null;
-        if (idleClip){ this.idleAction = this.mixer.clipAction(idleClip); this.idleAction.play(); }
-        else console.warn('No idle animation clip found');
+    _onAnimLoaded(anim, object, which){
+        try{
+            if (!this.mixer) this.mixer = new THREE.AnimationMixer(object);
+            const clip = anim && anim.animations && anim.animations.length ? anim.animations[0] : null;
+            if (!clip) return console.warn('No animation clip found for', which);
+            const action = this.mixer.clipAction(clip);
+            this.actions[which] = action;
+            // default play idle immediately
+            if (which === 'idle'){
+                action.play();
+                this._currentAction = 'idle';
+            }
+        } catch (e){ console.error('Error setting up animation', which, e); }
 
-        avatarEvents.addEventListener('startSpeaking', ()=> { if (this.idleAction) this.idleAction.timeScale = 1.5; });
-        avatarEvents.addEventListener('stopSpeaking', ()=> { if (this.idleAction) this.idleAction.timeScale = 1.0; });
+        // Ensure event listeners are set once
+        if (!this._avatarEventsBound){
+            this._avatarEventsBound = true;
+            // Speaking doesn't change animation state (stays idle)
+            avatarEvents.addEventListener('startThinking', ()=> this._setAction('thinking'));
+            avatarEvents.addEventListener('stopThinking', ()=> this._setAction('idle'));
+        }
+    }
+
+    _setAction(name){
+        if (!this.mixer) return;
+        if (this._currentAction === name) return;
+        const prev = this._currentAction;
+        const prevAction = prev && this.actions[prev] ? this.actions[prev] : null;
+        const nextAction = this.actions[name] ? this.actions[name] : null;
+        if (!nextAction){
+            // if requested action not available, fallback to idle
+            if (name !== 'idle' && this.actions.idle) { this._currentAction = 'idle'; return; }
+            return;
+        }
+        try{
+            nextAction.reset();
+            nextAction.play();
+            // crossfade if previous exists
+            if (prevAction){ prevAction.crossFadeTo(nextAction, 0.25, false); }
+            this._currentAction = name;
+        } catch(e){ console.error('Failed to switch action', name, e); }
     }
 
     _animate(){

@@ -124,11 +124,15 @@ class AudioManager {
 
     static async playWithVisemes(url, visemes, morphMesh, visemeMap, audioEl = null) {
         const audio = audioEl || new Audio(url);
+        // notify listeners that avatar is about to speak
+        try { avatarEvents.dispatchEvent(new Event('startSpeaking')); } catch(e){}
         if (morphMesh && visemeMap) {
             try { playAudioWithLipSync(url, visemes, morphMesh, visemeMap, audio); } catch(e) { console.error(e); }
         }
         await audio.play();
         await AudioManager.waitForTrueEnd(audio);
+        // done speaking
+        try { avatarEvents.dispatchEvent(new Event('stopSpeaking')); } catch(e){}
         return audio;
     }
 }
@@ -423,8 +427,12 @@ class TTSManager {
         this._busy = true;
         this.ui.setSendLoading(true);
         try {
+            // notify avatar that we're waiting for an AI response (thinking)
+            try { avatarEvents.dispatchEvent(new Event('startThinking')); } catch(e){}
             const res = await fetch('/synthesize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
             const data = await res.json();
+            // thinking finished (we have an AI response)
+            try { avatarEvents.dispatchEvent(new Event('stopThinking')); } catch(e){}
             await this._handleSynthesizeResponse(data);
         } catch (e) { console.error('Error during speech synthesis:', e); }
         finally { this.ui.setSendLoading(false); this._busy = false; }
