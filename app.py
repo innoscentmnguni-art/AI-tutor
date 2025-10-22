@@ -93,17 +93,11 @@ Example (Snell's law on the board):
 
 BOARD[Snell's law:
 
-$$n_1 \\sin\\theta_1 = n_2 \\sin\\theta_2$$
-
-where:
-
-$n_1$ is the refractive index of medium 1
-$\\theta_1$ is the angle of incidence
-$n_2$ is the refractive index of medium 2
-$\\theta_2$ is the angle of refraction]
+$$n_1 \\sin\\theta_1 = n_2 \\sin\\theta_2$$]
 
 SPEAK: I've written Snell's law on the board. The equation shows how the sine of the incident angle
-relates to the sine of the refracted angle by the ratio of the refractive indices.
+relates to the sine of the refracted angle by the ratio of the refractive indices. here, n1 and n2 are the refractive indices of the two media,
+and theta1 and theta2 are the angles of incidence and refraction, respectively.
 
 Guidelines:
 
@@ -134,7 +128,7 @@ Additional persona rules:
 
 def text_to_speech(text):
     speech_config = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SPEECH_REGION)
-    speech_config.speech_synthesis_voice_name = "en-ZA-LeahNeural"
+    speech_config.speech_synthesis_voice_name = "en-GB-SoniaNeural"
     filename = os.path.join(tempfile.gettempdir(), f"speech_{uuid.uuid4()}.wav")
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filename)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
