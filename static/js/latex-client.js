@@ -134,4 +134,3 @@ class MathJaxClient {
 
 const LatexClient = MathJaxClient;
 export default LatexClient;
-try{ if (typeof window !== 'undefined') window.latexClient = LatexClient; }catch(e){}

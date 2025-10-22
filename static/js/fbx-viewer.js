@@ -232,16 +232,7 @@ class FBXViewer {
     try { sprite.material.opacity = 0; } catch(e) { /* ignore */ }
 
         // expose simple helpers for runtime tweaking from console
-        try{
-            window.toggleAppleSprite = (v) => {
-                if (!this.appleSprite) return;
-                const show = typeof v === 'boolean' ? v : !this.appleSprite.visible;
-                this.appleSprite.visible = show;
-                try{ this.appleSprite.material.opacity = show ? 1.0 : 0.0; } catch(e) {}
-                console.log('toggleAppleSprite ->', show, this.appleSprite);
-            };
-            window.setAppleSpriteScale = (s) => { if (!this.appleSprite) return; const val = typeof s === 'number' ? s : 18; this.appleSprite.scale.set(val, val, 1); };
-        }catch(e){ /* ignore */ }
+        // No global debug helpers needed here; keep apple logic encapsulated on the instance.
     }
 
     // Gaze event handlers
@@ -335,11 +326,7 @@ class FBXViewer {
             this.sampleBoard = new SampleBoard({ scene: this.scene, rendererDom: this.renderer.domElement, modelObject: object });
             // expose lightweight wrappers for console/debug
             try{
-                window.updateSampleText = (...args) => { try{ return this.sampleBoard.updateText(...args); } catch(e){} };
-                window.drawInstructionsToBoard = (...args) => { try{ return this.sampleBoard.drawInstructions(...args); } catch(e){} };
-                window.setSampleBoardOffset = (...args) => { try{ return this.sampleBoard.setOffset(...args); } catch(e){} };
-                // expose the sampleBoard instance and combined helper for console use
-                try { window.sampleBoard = this.sampleBoard; } catch(e) {}
+                // Expose only the combined update (used elsewhere in the app) and the instance for debugging.
                 window.updateSampleTextCombined = (...args) => { try { return this.sampleBoard.updateCombined(...args); } catch(e){} };
             }catch(e){ /* ignore */ }
             console.log('Created sampleTextBoard via SampleBoard class (use updateSampleText / setSampleBoardOffset to tweak)');

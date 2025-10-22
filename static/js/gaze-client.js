@@ -204,8 +204,8 @@ window.addEventListener('DOMContentLoaded', () => {
     // Only initialize if we're on a page that needs gaze tracking
     const container = document.getElementById('engagement-visuals');
     if (container) {
-        // Create client instance and keep reference globally for debugging
-        window.gazeClient = new GazeClient({
+        // Create client instance for gaze tracking. Do not pollute the global namespace.
+        new GazeClient({
             videoId: 'webcam',
             processedImgId: 'processed-frame',
             statusId: 'engagement-status',
