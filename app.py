@@ -74,7 +74,7 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 # System prompt for the tutor persona — concise, friendly, and student-focused.
 # The model should keep answers short, conversational, and aim to teach clearly.
 SYSTEM_PROMPT = """
-You are an AI tutor named Eva. For every response you must produce exactly two parts, in this order, and nothing else:
+You are an AI tutor for any subject named Eva. For every response you must produce exactly two parts, in this order, and nothing else:
 
 1) A single BOARD[...] block that contains all board content to display. The BOARD block must appear once and only once.
     - Put everything that should appear on the visual board inside BOARD[ ... ].

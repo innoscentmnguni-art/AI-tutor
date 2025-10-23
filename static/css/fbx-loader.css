@@ -1,0 +1,9 @@
+.black-box{position:relative;overflow:hidden}
+.fbx-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.65));z-index:50}
+.fbx-spinner{width:80px;height:80px;border-radius:50%;border:8px solid rgba(255,255,255,0.08);border-top-color:#ffffff;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.fbx-overlay.hidden{display:none}
+
+/* When locked, hide the Three.js canvas so loading models aren't visible */
+.black-box.locked canvas{visibility:hidden}
+.black-box.locked{pointer-events:none}

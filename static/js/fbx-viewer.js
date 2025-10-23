@@ -351,6 +351,8 @@ class FBXViewer {
             if (which === 'idle'){
                 action.play();
                 this._currentAction = 'idle';
+                // Signal that the scene has finished core loading and is ready
+                try { window.fbxSceneReady = true; window.dispatchEvent(new Event('fbx-scene-ready')); } catch(e){}
             }
         } catch (e){ console.error('Error setting up animation', which, e); }
 
@@ -405,7 +407,7 @@ class FBXViewer {
                     const avatarScale = (this.avatarObject && this.avatarObject.scale) ? (this.avatarObject.scale.x || this.avatarObject.scale.y || this.avatarObject.scale.z || 1) : 1;
                     const scaledHeadPos = new THREE.Vector3(headWorldPos.x, headWorldPos.y , headWorldPos.z);
                     // offset sprite slightly above the head (scaled)
-                    const offset = new THREE.Vector3(-1, 1.7 * avatarScale, 20);
+                    const offset = new THREE.Vector3(-1, 1.6 * avatarScale, 20);
                     scaledHeadPos.add(offset);
                     this.appleSprite.position.copy(scaledHeadPos);
                     // ensure sprite faces the camera (Three.Sprite does this by default)

@@ -6,3 +6,7 @@ opencv-python-headless==4.9.0.80
 numpy==1.26.4
 mediapipe==0.10.21
 scipy==1.11.3
+gunicorn
+google-generativeai==0.7.2
+python-dotenv==1.0.1
+requests==2.31.0

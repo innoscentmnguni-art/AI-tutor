@@ -132,7 +132,7 @@ class ThemeManager {
 }
 
 class AudioManager {
-    static waitForTrueEnd(audio, minSilenceMs = 800) {
+    static waitForTrueEnd(audio, minSilenceMs = 300) {
         return new Promise((resolve) => {
             let silenceTimer = null;
             let resolved = false;
@@ -497,7 +497,13 @@ class TTSManager {
                     window.updateSampleTextCombined(elems, 2048, 1024);
                 } catch(e) { console.error(e); }
             }
-            if (data.audio_url) await AudioManager.playWithVisemes(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap);
+            if (data.audio_url) {
+                // Wait for FBX scene readiness and overlay delay if available
+                try {
+                    if (window.fbxReadyPromise) await window.fbxReadyPromise;
+                } catch(e) { /* ignore */ }
+                await AudioManager.playWithVisemes(data.audio_url, data.visemes, window.avatarMorphMesh, window.avatarVisemeMap);
+            }
         } catch (e) { console.error('Error fetching/playing greeting:', e); }
         finally { this.ui.setSendLoading(false); this._busy = false; }
     }
@@ -604,6 +610,40 @@ class AppController {
         this.ttsInput = document.getElementById('tts-input') || (this.ttsForm ? this.ttsForm.querySelector('input') : null);
         this.ttsSendButton = document.getElementById('tts-send-btn') || (this.ttsForm ? this.ttsForm.querySelector('button') : null);
         this.ttsMicButton = document.getElementById('tts-mic-btn');
+
+        // Setup FBX loader overlay and scene-ready promise.
+        this._fbxOverlay = document.getElementById('fbx-loader-overlay');
+        this._blackBoxEl = document.querySelector('.black-box');
+        if (this._fbxOverlay) {
+            // Ensure overlay is visible initially
+            this._fbxOverlay.classList.remove('hidden');
+        }
+        if (this._blackBoxEl) {
+            // lock the black-box so the three.js canvas is hidden while loading
+            this._blackBoxEl.classList.add('locked');
+        }
+        const self = this;
+        const minDelayMs = 2000;
+    let timerDone = false;
+    let sceneReady = !!window.fbxSceneReady;
+        window.fbxReadyPromise = new Promise((resolve) => {
+            // timer
+            setTimeout(() => { timerDone = true; if (timerDone && sceneReady) {
+                try { if (self._fbxOverlay) self._fbxOverlay.classList.add('hidden'); } catch(e){}
+                try { if (self._blackBoxEl) self._blackBoxEl.classList.remove('locked'); } catch(e){}
+                resolve();
+            } }, minDelayMs);
+            // listen for scene ready event (fired by FBX viewer when idle anim starts)
+            window.addEventListener('fbx-scene-ready', function onReady(){
+                sceneReady = true;
+                try { window.removeEventListener('fbx-scene-ready', onReady); } catch(e){}
+                if (timerDone && sceneReady) {
+                    try { if (self._fbxOverlay) self._fbxOverlay.classList.add('hidden'); } catch(e){}
+                    try { if (self._blackBoxEl) self._blackBoxEl.classList.remove('locked'); } catch(e){}
+                    resolve();
+                }
+            });
+        });
 
         this.theme = new ThemeManager(this.html, this.themeToggle, this.themeIcon);
         this.tts = new TTSManager(this.ttsInput, this.ttsSendButton, this.ttsMicButton);
