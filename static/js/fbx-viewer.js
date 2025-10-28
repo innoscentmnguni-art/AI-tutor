@@ -277,7 +277,7 @@ class FBXViewer {
                     console.log('Disengagement timer fired: showing apple');
                     this._showAppleImmediate();
                     this._gazeTimer = null;
-                }, 3000);
+                }, 2000);
             }
         }
     }

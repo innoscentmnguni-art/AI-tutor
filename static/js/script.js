@@ -238,7 +238,7 @@ class SpeechRecognitionManager {
         this.buffer = [];
         this.silenceStart = null;
         this.threshold = 0.01;
-        this.silenceMs = 1000;
+        this.silenceMs = 750;
         // When true, any captured audio or pending transcriptions will be discarded
         this._blockedForPlayback = false;
         // remember desired keepAlive across temporary blocks
