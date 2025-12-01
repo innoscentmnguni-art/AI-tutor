@@ -333,10 +333,12 @@ class FBXViewer {
             this.sampleBoard = new SampleBoard({ scene: this.scene, rendererDom: this.renderer.domElement, modelObject: object });
             // expose lightweight wrappers for console/debug
             try{
-                // Expose only the combined update (used elsewhere in the app) and the instance for debugging.
+                // Expose combined update (backward compatibility) and new clear/add functions
                 window.updateSampleTextCombined = (...args) => { try { return this.sampleBoard.updateCombined(...args); } catch(e){} };
+                window.clearBoard = () => { try { return this.sampleBoard.clearBoard(); } catch(e){} };
+                window.addToBoard = (...args) => { try { return this.sampleBoard.addToBoard(...args); } catch(e){} };
             }catch(e){ /* ignore */ }
-            console.log('Created sampleTextBoard via SampleBoard class (use updateSampleText / setSampleBoardOffset to tweak)');
+            console.log('Created sampleTextBoard via SampleBoard class (use clearBoard/addToBoard or updateSampleTextCombined to modify)');
         } catch (e){ console.error('Failed to create sample text board', e); }
     }
 

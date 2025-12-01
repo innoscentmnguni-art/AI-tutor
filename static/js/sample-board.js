@@ -88,10 +88,42 @@ export default class SampleBoard {
     return finalH;
   }
 
-  // Compose a sequence of elements (text or latex) into one combined texture.
-  // elements: [{ type: 'text', text: '...', x?:number }, { type: 'latex', latex: '...', width?:number, height?:number, x?:number }, ...]
-  // Order of elements is preserved. Each element is rendered to its own canvas then stacked vertically with small spacing.
-  async updateCombined(elements = [], texWidth = this.texWidth, texHeight = this.texHeight){
+  // Clear the board and reset state
+  clearBoard(){
+    if (!this._sampleTextBoard) return;
+    this._lastCombinedElements = [];
+    this._sampleBoardScrollY = 0;
+    this._sampleBoardContentHeight = 0;
+    this._sampleBoardCanvasHeight = 0;
+    this._stackedCanvas = null;
+    this._mode = 'combined';
+    // Create empty texture
+    const emptyCanvas = document.createElement('canvas');
+    emptyCanvas.width = this.texWidth;
+    emptyCanvas.height = this.texHeight;
+    const ctx = emptyCanvas.getContext('2d');
+    ctx.clearRect(0, 0, emptyCanvas.width, emptyCanvas.height);
+    const tex = this._canvasToTexture(emptyCanvas);
+    const mat = this._sampleTextBoard.material;
+    if (mat.map) this._safeDisposeTexture(mat.map);
+    mat.map = tex;
+    mat.needsUpdate = true;
+    console.log('Board cleared');
+  }
+
+  // Add elements to the existing board
+  async addToBoard(newElements = []){
+    if (!this._sampleTextBoard) return;
+    if (!Array.isArray(newElements)) return;
+    // Append new elements to existing ones
+    const currentElements = this._lastCombinedElements || [];
+    const combinedElements = [...currentElements, ...newElements];
+    // Use internal combined rendering with updated elements
+    await this._renderCombinedElements(combinedElements);
+  }
+
+  // Internal method: render combined elements (used by both updateCombined and addToBoard)
+  async _renderCombinedElements(elements = []){
     if (!this._sampleTextBoard) return;
     if (!Array.isArray(elements)) return;
     // cache for redraw/scroll
@@ -106,18 +138,18 @@ export default class SampleBoard {
       if (el.type === 'text'){
         const text = String(el.text || '');
         // Use _createCanvasForText to layout text within texWidth x texHeight; it returns contentHeight
-        const { canvas: textCanvas, contentHeight } = this._createCanvasForText(text, texWidth, texHeight, 0);
+        const { canvas: textCanvas, contentHeight } = this._createCanvasForText(text, this.texWidth, this.texHeight, 0);
         // crop to content height
         const cropH = Math.max( Math.min(contentHeight, textCanvas.height), 1 );
-        const outCanvas = document.createElement('canvas'); outCanvas.width = texWidth; outCanvas.height = cropH;
+        const outCanvas = document.createElement('canvas'); outCanvas.width = this.texWidth; outCanvas.height = cropH;
         const outCtx = outCanvas.getContext('2d'); outCtx.clearRect(0,0,outCanvas.width,outCanvas.height);
-        outCtx.drawImage(textCanvas, 0, 0, texWidth, cropH, 0, 0, texWidth, cropH);
+        outCtx.drawImage(textCanvas, 0, 0, this.texWidth, cropH, 0, 0, this.texWidth, cropH);
         elementCanvases.push({ canvas: outCanvas, x: (typeof el.x === 'number') ? el.x : 0, height: outCanvas.height });
       } else if (el.type === 'latex'){
         const latex = String(el.latex || '');
         // choose render height for latex element (may be adjusted based on content)
-        const desiredH = this._computeLatexHeight(el, texHeight);
-        const desiredW = (typeof el.width === 'number') ? el.width : texWidth;
+        const desiredH = this._computeLatexHeight(el, this.texHeight);
+        const desiredW = (typeof el.width === 'number') ? el.width : this.texWidth;
         try{
           const opts = {};
           
@@ -126,7 +158,7 @@ export default class SampleBoard {
           if (typeof el.charSizePx === 'number') {
             opts.charSizePx = Math.max(8, Math.floor(el.charSizePx));
           } else {
-            opts.charSizePx = Math.max(12, Math.floor(texHeight * 0.09));
+            opts.charSizePx = Math.max(12, Math.floor(this.texHeight * 0.09));
           }
           // ensure display math by default
           opts.display = (typeof el.display === 'boolean') ? el.display : true;
@@ -137,14 +169,48 @@ export default class SampleBoard {
             elementCanvases.push({ canvas: imgCanvas, x: (typeof el.x === 'number') ? el.x : 0, height: imgCanvas.height });
           } else {
             // fallback: render latex source as plain text
-            const fallback = document.createElement('canvas'); fallback.width = texWidth; fallback.height = Math.floor(texHeight * 0.06);
+            const fallback = document.createElement('canvas'); fallback.width = this.texWidth; fallback.height = Math.floor(this.texHeight * 0.06);
             const fctx = fallback.getContext('2d'); fctx.fillStyle = '#fff'; fctx.font = `${Math.floor(fallback.height * 0.9)}px "Times New Roman", Times, serif`; fctx.textBaseline = 'top'; fctx.fillText(latex, 0, 0);
             elementCanvases.push({ canvas: fallback, x: (typeof el.x === 'number') ? el.x : 0, height: fallback.height });
           }
         } catch(e){
           // on error, fallback to plain text canvas
-          const fallback = document.createElement('canvas'); fallback.width = texWidth; fallback.height = Math.floor(texHeight * 0.06);
+          const fallback = document.createElement('canvas'); fallback.width = this.texWidth; fallback.height = Math.floor(this.texHeight * 0.06);
           const fctx = fallback.getContext('2d'); fctx.fillStyle = '#fff'; fctx.font = `${Math.floor(fallback.height * 0.9)}px "Times New Roman", Times, serif`; fctx.textBaseline = 'top'; fctx.fillText(latex, 0, 0);
+          elementCanvases.push({ canvas: fallback, x: (typeof el.x === 'number') ? el.x : 0, height: fallback.height });
+        }
+      } else if (el.type === 'image' && el.url){
+        try{
+          const img = await new Promise((res, rej)=>{
+            const i = new Image();
+            i.crossOrigin = 'anonymous';
+            i.onload = ()=> res(i);
+            i.onerror = rej;
+            i.src = el.url;
+          });
+          const w = el.width || img.width;
+          const h = el.height || img.height;
+          // Create canvas for image with fixed left margin
+          const leftMargin = this.texWidth * 0.04; // fixed margin in pixels
+          const maxWidth = Math.min(w, this.texWidth - leftMargin);
+          const imgCanvas = document.createElement('canvas');
+          imgCanvas.width = this.texWidth;
+          imgCanvas.height = h * (maxWidth / w); // maintain aspect ratio
+          const ictx = imgCanvas.getContext('2d');
+          ictx.clearRect(0, 0, imgCanvas.width, imgCanvas.height);
+          ictx.drawImage(img, leftMargin, 0, maxWidth, imgCanvas.height);
+          elementCanvases.push({ canvas: imgCanvas, x: 0, height: imgCanvas.height });
+        } catch(e){
+          console.error('Failed to load image', el.url, e);
+          // Fallback: render error text
+          const fallback = document.createElement('canvas');
+          fallback.width = this.texWidth;
+          fallback.height = Math.floor(this.texHeight * 0.06);
+          const fctx = fallback.getContext('2d');
+          fctx.fillStyle = '#f44';
+          fctx.font = `${Math.floor(fallback.height * 0.8)}px sans-serif`;
+          fctx.textBaseline = 'top';
+          fctx.fillText('[Image failed to load]', 0, 0);
           elementCanvases.push({ canvas: fallback, x: (typeof el.x === 'number') ? el.x : 0, height: fallback.height });
         }
       } else {
@@ -155,9 +221,9 @@ export default class SampleBoard {
   // compute combined height
     let totalHeight = 0;
     for (const ec of elementCanvases) totalHeight += ec.height + spacing;
-    if (totalHeight <= 0) totalHeight = texHeight;
+    if (totalHeight <= 0) totalHeight = this.texHeight;
     // create stacked final canvas
-    const stackedCanvas = document.createElement('canvas'); stackedCanvas.width = texWidth; stackedCanvas.height = totalHeight;
+    const stackedCanvas = document.createElement('canvas'); stackedCanvas.width = this.texWidth; stackedCanvas.height = totalHeight;
     const sctx = stackedCanvas.getContext('2d'); sctx.clearRect(0,0,stackedCanvas.width,stackedCanvas.height);
     let y = 0;
     for (const ec of elementCanvases){
@@ -167,20 +233,29 @@ export default class SampleBoard {
     }
 
     // crop viewport canvas according to current scroll
-    const viewY = Math.max(0, Math.min(this._sampleBoardScrollY || 0, Math.max(0, stackedCanvas.height - texHeight)));
-    const viewportCanvas = document.createElement('canvas'); viewportCanvas.width = texWidth; viewportCanvas.height = texHeight;
+    const viewY = Math.max(0, Math.min(this._sampleBoardScrollY || 0, Math.max(0, stackedCanvas.height - this.texHeight)));
+    const viewportCanvas = document.createElement('canvas'); viewportCanvas.width = this.texWidth; viewportCanvas.height = this.texHeight;
     const vctx = viewportCanvas.getContext('2d'); vctx.clearRect(0,0,viewportCanvas.width,viewportCanvas.height);
-    vctx.drawImage(stackedCanvas, 0, viewY, texWidth, texHeight, 0, 0, texWidth, texHeight);
+    vctx.drawImage(stackedCanvas, 0, viewY, this.texWidth, this.texHeight, 0, 0, this.texWidth, this.texHeight);
 
     // convert to texture and apply
     const tex = this._canvasToTexture(viewportCanvas);
     const mat = this._sampleTextBoard.material; if (mat.map) this._safeDisposeTexture(mat.map); mat.map = tex; mat.needsUpdate = true;
     // update internal metrics for scrolling
     this._sampleBoardContentHeight = totalHeight;
-    this._sampleBoardCanvasHeight = texHeight;
-    console.log('updateCombined applied', { elements: elements.length, stackedHeight: stackedCanvas.height, viewY });
+    this._sampleBoardCanvasHeight = this.texHeight;
+    console.log('Board rendered', { elements: elements.length, stackedHeight: stackedCanvas.height, viewY });
     // cache the stacked canvas so future scroll redraws can be fast (no re-layout/re-render)
-    try { this._stackedCanvas = stackedCanvas; this._stackedCanvasWidth = texWidth; this._stackedCanvasHeight = totalHeight; } catch(e) { this._stackedCanvas = null; }
+    try { this._stackedCanvas = stackedCanvas; this._stackedCanvasWidth = this.texWidth; this._stackedCanvasHeight = totalHeight; } catch(e) { this._stackedCanvas = null; }
+  }
+
+  // Compose a sequence of elements (text or latex) into one combined texture.
+  // elements: [{ type: 'text', text: '...', x?:number }, { type: 'latex', latex: '...', width?:number, height?:number, x?:number }, ...]
+  // Order of elements is preserved. Each element is rendered to its own canvas then stacked vertically with small spacing.
+  // DEPRECATED: Use clearBoard() followed by addToBoard() instead for more control
+  async updateCombined(elements = [], texWidth = this.texWidth, texHeight = this.texHeight){
+    this.clearBoard();
+    await this._renderCombinedElements(elements);
   }
 
   // Render viewport from a cached stacked canvas (fast path for scroll-only updates)
