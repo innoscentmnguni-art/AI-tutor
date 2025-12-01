@@ -59,6 +59,15 @@
                         </a> 
                     </li> 
                 </ul> 
+                <hr>
+                <!-- Gaze Tracking Section -->
+                <div id="engagement-visuals" style="width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 16px;">
+                    <!-- Hidden raw video (used for capture) -->
+                    <video id="webcam" width="200" height="150" autoplay muted style="display:none; visibility:hidden;"></video>
+                    <img id="processed-frame" width="200" height="150" style="border: 2px solid #ccc; border-radius: 8px; margin-bottom: 12px; display: none;" />
+                    <div id="gaze-angle" style="font-size: 0.85em; color: #ddd; margin-bottom: 8px; display: none;">Gaze Angle: --</div>
+                    <div id="engagement-status" style="font-size: 1em; font-weight: bold; color: #fff; background: #444; padding: 8px 16px; border-radius: 6px; margin-top: 8px;">Eye tracking off</div>
+                </div>
                 <hr> 
                 <div class="dropdown"> 
                     <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"> 
@@ -78,19 +87,9 @@
     </div>
 
     <!-- Main content -->
-    <div class="container-fluid">
+    <div class="container-fluid" style="max-width: 95%;">
         <div class="row" style="min-height:70vh;">
-            <aside class="col-lg-3 col-md-4 col-12 d-flex flex-column gap-2 p-3">
-                <div id="engagement-visuals" style="width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 45vh; margin-left: 2cm;">
-                    <!-- Hidden raw video (used for capture) -->
-                    <video id="webcam" width="300" height="225" autoplay muted style="display:none; visibility:hidden;"></video>
-                    <img id="processed-frame" width="300" height="225" style="border: 2px solid #ccc; border-radius: 8px; margin-bottom: 12px; display: none;" />
-                    <div id="gaze-angle" style="font-size: 0.95em; color: #ddd; margin-bottom: 8px; display: none;">Gaze Angle: --</div>
-                    <div id="engagement-status" style="font-size: 1.2em; font-weight: bold; color: #fff; background: #444; padding: 8px 16px; border-radius: 6px; margin-top: 8px;">Eye tracking off</div>
-                </div>
-            </aside>
-
-            <main class="col-lg-9 col-md-8 col-12 d-flex flex-column align-items-center py-4">
+            <main class="col-12 d-flex flex-column align-items-center py-4">
                 <div class="black-box d-flex align-items-center justify-content-center mb-3">
                     <div id="fbx-container" style="width:100%;height:100%;"></div>
                     <div id="fbx-loader-overlay" class="fbx-overlay">
